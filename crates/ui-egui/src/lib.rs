@@ -168,7 +168,7 @@ pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
     ("app.saveAsDialog", "Save As…", None, "{}"),
     ("app.exportDialog", "Export…", None, "{}"),
     ("app.dialog", "Open Dialog", None, "{id}"),
-    ("app.links", "Community Links", None, "{}"),
+    ("app.links", "Project Links", None, "{}"),
 ];
 
 pub struct Perf {
@@ -539,7 +539,7 @@ impl SlideApp {
             "app.insertPictureDialog" => self.pick_and_insert("picture", "insert.picture"),
             "app.insertAudioDialog" => self.pick_and_insert("audio", "insert.audio"),
             "app.insertVideoDialog" => self.pick_and_insert("video", "insert.video"),
-            "app.saveAsDialog" => self.save_as_dialog("deckcraft"),
+            "app.saveAsDialog" => self.save_as_dialog(self.default_save_format()),
             "app.exportDialog" => self.dialog = Some(dialogs::Dialog::new("export")),
             "app.dialog" => {
                 let d = p.get("id").and_then(Value::as_str).ok_or("missing `id`")?;
@@ -547,7 +547,7 @@ impl SlideApp {
             }
             "app.links" => {
                 use deckcraft_engine::links::*;
-                return Ok(json!({"discord": DISCORD, "website": WEBSITE, "apps": APPS, "appPage": APP_PAGE, "github": GITHUB}));
+                return Ok(json!({"github": GITHUB, "issues": ISSUES}));
             }
             _ => return Err(format!("unknown UI command `{id}`")),
         }
@@ -615,13 +615,24 @@ impl SlideApp {
                 }
             }
         } else if let Some(dl) = self.services.download.as_mut()
-            && let Some(d) = self.session.active()
+            && let Some(d) = self.session.active_mut()
         {
             match deckcraft_engine::cmd::file::save_bytes(&d.doc, ext) {
-                Ok(bytes) => dl(&suggested, &bytes),
+                Ok(bytes) => {
+                    dl(&suggested, &bytes);
+                    // The browser never says whether the download finished; without this the tab
+                    // would warn about unsaved changes the user just downloaded, forever.
+                    d.saved_doc = d.doc.clone();
+                }
                 Err(e) => self.set_status(e.to_string()),
             }
         }
+    }
+
+    /// Format Save writes when nothing names one. A host with only a download sink (the web) gets
+    /// .pptx, which people can open again anywhere; ERPCons decision 2026-10-14.
+    fn default_save_format(&self) -> &'static str {
+        if self.services.pick_save.is_none() && self.services.download.is_some() { "pptx" } else { "deckcraft" }
     }
 
     /// Save every presentation with unsaved changes (asking for a location where needed).
@@ -645,7 +656,7 @@ impl SlideApp {
                 Err(e) => self.set_status(e.to_string()),
             }
         } else {
-            self.save_as_dialog("deckcraft");
+            self.save_as_dialog(self.default_save_format());
         }
     }
 
@@ -663,7 +674,7 @@ impl SlideApp {
                 UiRequest::Message { text } => self.set_status(text),
                 UiRequest::PickFile { purpose } => {
                     if purpose == "saveAs" {
-                        self.save_as_dialog("deckcraft");
+                        self.save_as_dialog(self.default_save_format());
                     }
                 }
                 UiRequest::Media { action, shape, ms } => {
@@ -1140,6 +1151,90 @@ mod tests {
         let d = app.session.active().unwrap();
         let sh = &d.doc.slides[0].shapes[0];
         sh.text.as_ref().map(|t| t.paragraphs.iter().map(|p| p.text()).collect::<Vec<_>>().join("\n")).unwrap_or_default()
+    }
+
+    #[test]
+    fn web_save_downloads_pptx_and_clears_the_unsaved_mark() {
+        let saved: std::rc::Rc<std::cell::RefCell<Vec<(String, Vec<u8>)>>> = Default::default();
+        let sink = saved.clone();
+        let services = Services {
+            download: Some(Box::new(move |name: &str, bytes: &[u8]| sink.borrow_mut().push((name.to_owned(), bytes.to_vec())))),
+            ..Default::default()
+        };
+        let mut app = SlideApp::new(Session::with_new(), services);
+        {
+            let d = app.session.active_mut().unwrap();
+            d.doc = std::sync::Arc::new((*d.doc).clone());
+        }
+        assert!(app.session.active().unwrap().is_dirty());
+        app.save();
+        let saved = saved.borrow();
+        assert_eq!(saved.len(), 1, "one download");
+        assert!(saved[0].0.ends_with(".pptx"), "downloaded as {}", saved[0].0);
+        assert!(saved[0].1.starts_with(b"PK"), "a .pptx is a zip");
+        assert!(!app.session.active().unwrap().is_dirty(), "the download counts as saved");
+    }
+
+    #[test]
+    fn close_prompt_save_on_web_keeps_the_document_when_the_save_fails() {
+        use egui_kittest::kittest::Queryable;
+        let services = Services { download: Some(Box::new(|_: &str, _: &[u8]| {})), ..Default::default() };
+        let mut app = SlideApp::new(Session::with_new(), services);
+        {
+            let d = app.session.active_mut().unwrap();
+            d.doc = std::sync::Arc::new((*d.doc).clone());
+            // A path in a missing directory makes file.save fail, leaving the document dirty.
+            d.path = Some("/erpcons-no-such-dir/x.deckcraft".into());
+        }
+        app.close_presentation();
+        let mut harness = egui_kittest::Harness::builder().with_size(egui::vec2(1200.0, 800.0)).build_ui_state(
+            |ui, app: &mut SlideApp| {
+                app.logic(ui.ctx());
+                app.ui(ui);
+            },
+            app,
+        );
+        harness.run_steps(3);
+        harness.get_by_label("Save").click();
+        harness.run_steps(3);
+        let docs = harness.state().session.documents();
+        assert_eq!(docs.len(), 1, "a failed save must not close the presentation");
+        assert!(docs[0].is_dirty());
+    }
+
+    #[test]
+    fn desktop_save_as_still_suggests_deckcraft() {
+        let asked: std::rc::Rc<std::cell::RefCell<Vec<String>>> = Default::default();
+        let seen = asked.clone();
+        let services = Services {
+            pick_save: Some(Box::new(move |suggested: &str| {
+                seen.borrow_mut().push(suggested.to_owned());
+                None
+            })),
+            ..Default::default()
+        };
+        let mut app = SlideApp::new(Session::with_new(), services);
+        app.save();
+        assert!(asked.borrow().first().is_some_and(|s| s.ends_with(".deckcraft")), "{:?}", asked.borrow());
+    }
+
+    #[test]
+    fn about_credits_upstream_without_artcraft_links() {
+        use egui_kittest::kittest::Queryable;
+        let mut harness = egui_kittest::Harness::builder().with_size(egui::vec2(1200.0, 800.0)).build_ui_state(
+            |ui, app: &mut SlideApp| {
+                app.logic(ui.ctx());
+                app.ui(ui);
+            },
+            SlideApp::new(Session::with_new(), Services::default()),
+        );
+        harness.state_mut().run("app.about", json!({})).unwrap();
+        harness.run_steps(4);
+        assert!(harness.query_by_label("ERPCons Văn phòng — dựa trên DeckCraft của nhóm ArtCraft. MIT OR Apache-2.0.").is_some());
+        assert!(harness.query_by_label_contains("Discord").is_none());
+        assert!(harness.query_by_label_contains("getartcraft").is_none());
+        let links = harness.state_mut().run("app.links", json!({})).unwrap();
+        assert_eq!(links, json!({"github": "https://github.com/tuananhfr/deckcraft", "issues": "https://github.com/tuananhfr/deckcraft/issues"}));
     }
 
     #[test]

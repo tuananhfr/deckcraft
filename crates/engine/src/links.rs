@@ -1,8 +1,5 @@
-//! Community and project links (shown in Help, About, the CLI and MCP).
+//! Project links (shown in Help, About, the CLI and MCP). The ERPCons fork links its own source,
+//! not the ArtCraft pages (their brand terms).
 
-pub const DISCORD: &str = "https://discord.gg/artcraft";
-pub const WEBSITE: &str = "https://getartcraft.com/";
-pub const APPS: &str = "https://getartcraft.com/apps";
-pub const APP_PAGE: &str = "https://getartcraft.com/apps/deckcraft";
-pub const GITHUB: &str = "https://github.com/storytold/deckcraft";
-pub const ISSUES: &str = "https://github.com/storytold/deckcraft/issues";
+pub const GITHUB: &str = "https://github.com/tuananhfr/deckcraft";
+pub const ISSUES: &str = "https://github.com/tuananhfr/deckcraft/issues";
