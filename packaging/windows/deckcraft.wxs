@@ -28,9 +28,9 @@
 
     <Icon Id="DeckcraftIcon.ico" SourceFile="$(var.IconPath)" />
     <Property Id="ARPPRODUCTICON" Value="DeckcraftIcon.ico" />
-    <Property Id="ARPURLINFOABOUT" Value="https://getartcraft.com/apps/deckcraft" />
-    <Property Id="ARPURLUPDATEINFO" Value="https://getartcraft.com/apps/deckcraft" />
-    <Property Id="ARPHELPLINK" Value="https://discord.gg/artcraft" />
+    <Property Id="ARPURLINFOABOUT" Value="https://github.com/tuananhfr/deckcraft" />
+    <Property Id="ARPURLUPDATEINFO" Value="https://github.com/tuananhfr/deckcraft/releases" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/tuananhfr/deckcraft/issues" />
 
     <StandardDirectory Id="ProgramFiles6432Folder">
       <Directory Id="INSTALLFOLDER" Name="DeckCraft" />
