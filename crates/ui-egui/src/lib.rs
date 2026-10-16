@@ -41,6 +41,19 @@ pub type WriteFn = Box<dyn FnMut(&str, &[u8]) -> Result<(), String>>;
 pub type PickFn = Box<dyn FnMut(&str) -> Option<String>>;
 pub type OpenAsyncFn = Box<dyn FnMut(&str)>;
 pub type DownloadFn = Box<dyn FnMut(&str, &[u8])>;
+
+/// How a save handed to [`Services::save_file`] ended.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum SaveOutcome {
+    /// The file was written.
+    Saved,
+    /// The user closed the picker without saving.
+    Cancelled,
+    Failed(String),
+}
+/// Reports how a save ended; the host may call it after `save_file` has returned.
+pub type SaveDone = Box<dyn FnOnce(SaveOutcome)>;
+pub type SaveFileFn = Box<dyn FnMut(&str, &[u8], SaveDone)>;
 /// Files `(name, bytes)` delivered asynchronously by the host (web file picker, dropped files).
 pub type Inbox = std::sync::Arc<std::sync::Mutex<Vec<(String, Vec<u8>)>>>;
 
@@ -57,6 +70,9 @@ pub struct Services {
     pub open_async: Option<OpenAsyncFn>,
     /// Hand bytes to the user as a named file (browser download).
     pub download: Option<DownloadFn>,
+    /// Save a presentation as a file the user picks (the browser's save picker, or a download
+    /// where there is none). Save and Save As use it over `download` when both are there.
+    pub save_file: Option<SaveFileFn>,
     pub inbox: Option<Inbox>,
     /// Image on the system clipboard (PNG bytes), when the host can read one.
     pub clipboard_image: Option<Box<dyn FnMut() -> Option<Vec<u8>>>>,
@@ -227,6 +243,19 @@ pub struct SlideApp {
     pub(crate) thumb_drag: Option<(usize, usize)>,
     /// Selection pane: folded groups, renaming, drag and drop.
     pub selpane: selpane::State,
+    /// Saves handed to `Services::save_file` that haven't ended yet.
+    pending_saves: Vec<PendingSave>,
+    /// How those saves ended, as the host reports it (from an async task on the web).
+    save_results: std::rc::Rc<std::cell::RefCell<Vec<(u64, SaveOutcome)>>>,
+    next_save: u64,
+}
+
+/// A save the host hasn't finished: the presentation as it was written, by document uid.
+struct PendingSave {
+    id: u64,
+    uid: u64,
+    written: std::sync::Arc<deckcraft_model::Presentation>,
+    name: String,
 }
 
 impl SlideApp {
@@ -267,6 +296,9 @@ impl SlideApp {
             ui_fonts: uifonts::UiFonts::default(),
             thumb_drag: None,
             selpane: selpane::State::default(),
+            pending_saves: vec![],
+            save_results: Default::default(),
+            next_save: 0,
         }
     }
 
@@ -614,6 +646,29 @@ impl SlideApp {
                     Err(e) => self.set_status(e.to_string()),
                 }
             }
+        } else if let Some(save) = self.services.save_file.as_mut()
+            && let Some((uid, doc)) = self.session.active().map(|d| (d.uid, d.doc.clone()))
+        {
+            match deckcraft_engine::cmd::file::save_bytes(&doc, ext) {
+                Ok(bytes) => {
+                    self.next_save += 1;
+                    let id = self.next_save;
+                    self.pending_saves.push(PendingSave { id, uid, written: doc, name: suggested.clone() });
+                    let results = self.save_results.clone();
+                    save(
+                        &suggested,
+                        &bytes,
+                        Box::new(move |outcome| {
+                            if let Ok(mut r) = results.try_borrow_mut() {
+                                r.push((id, outcome));
+                            }
+                        }),
+                    );
+                    // A host that downloads at once has already reported back.
+                    self.settle_saves();
+                }
+                Err(e) => self.set_status(e.to_string()),
+            }
         } else if let Some(dl) = self.services.download.as_mut()
             && let Some(d) = self.session.active_mut()
         {
@@ -627,6 +682,41 @@ impl SlideApp {
                 Err(e) => self.set_status(e.to_string()),
             }
         }
+    }
+
+    /// Applies how the host's saves ended: a written file marks the presentation as it was
+    /// written saved (edits made since stay unsaved), a cancelled one changes nothing.
+    pub fn settle_saves(&mut self) {
+        let results = match self.save_results.try_borrow_mut() {
+            Ok(mut r) => std::mem::take(&mut *r),
+            Err(_) => return,
+        };
+        for (id, outcome) in results {
+            let Some(i) = self.pending_saves.iter().position(|p| p.id == id) else { continue };
+            let p = self.pending_saves.remove(i);
+            match outcome {
+                SaveOutcome::Saved => self.mark_saved(p.uid, p.written),
+                SaveOutcome::Cancelled => {}
+                SaveOutcome::Failed(e) => self.set_status(format!("Couldn't save {}: {e}", p.name)),
+            }
+        }
+    }
+
+    fn mark_saved(&mut self, uid: u64, written: std::sync::Arc<deckcraft_model::Presentation>) {
+        let Some(i) = self.session.documents().iter().position(|d| d.uid == uid) else { return };
+        let active = self.session.active_index();
+        self.session.set_active(i);
+        if let Some(d) = self.session.active_mut() {
+            d.saved_doc = written;
+        }
+        if let Some(a) = active {
+            self.session.set_active(a);
+        }
+    }
+
+    /// Closing the page now would lose work: unsaved changes, or a save the host hasn't finished.
+    pub fn has_unsaved_changes(&self) -> bool {
+        self.session.documents().iter().any(|d| d.is_dirty()) || !self.pending_saves.is_empty()
     }
 
     /// Format Save writes when nothing names one. A host with only a download sink (the web) gets
@@ -752,6 +842,7 @@ impl SlideApp {
         }
         self.last_time = now;
         self.drain_control(ctx);
+        self.settle_saves();
         if self.fonts_ready {
             self.drain_inbox();
         }
@@ -826,6 +917,9 @@ impl SlideApp {
                 self.session.compose_text(text, active_range_chars.as_ref().map(|r| (r.start, r.end)))
             }
             egui::ImeEvent::Commit(text) => self.session.commit_text(text),
+            // Telex and phone keyboards rewrite letters already typed: the deletion comes first,
+            // then the replacement as text or a preedit.
+            egui::ImeEvent::DeleteSurrounding { before_chars, after_chars } => self.session.delete_surrounding(*before_chars, *after_chars),
             #[allow(deprecated)]
             egui::ImeEvent::Disabled => {
                 self.session.end_composition();
@@ -1173,6 +1267,125 @@ mod tests {
         assert!(saved[0].0.ends_with(".pptx"), "downloaded as {}", saved[0].0);
         assert!(saved[0].1.starts_with(b"PK"), "a .pptx is a zip");
         assert!(!app.session.active().unwrap().is_dirty(), "the download counts as saved");
+    }
+
+    type PickerCalls = std::rc::Rc<std::cell::RefCell<Vec<(String, Vec<u8>, Option<SaveDone>)>>>;
+
+    /// Web services whose save picker stays open until the test settles it, plus the download
+    /// sink exports use.
+    fn picker_app() -> (SlideApp, PickerCalls) {
+        let calls: PickerCalls = Default::default();
+        let sink = calls.clone();
+        let services = Services {
+            save_file: Some(Box::new(move |name: &str, bytes: &[u8], done: SaveDone| {
+                sink.borrow_mut().push((name.to_owned(), bytes.to_vec(), Some(done)))
+            })),
+            download: Some(Box::new(|_: &str, _: &[u8]| {})),
+            ..Default::default()
+        };
+        let mut app = SlideApp::new(Session::with_new(), services);
+        app.run("slide.new", json!({})).unwrap();
+        (app, calls)
+    }
+
+    /// Ends every save still in the picker with `outcome`.
+    fn settle(calls: &PickerCalls, outcome: SaveOutcome) {
+        let open: Vec<SaveDone> = calls.borrow_mut().iter_mut().filter_map(|c| c.2.take()).collect();
+        assert!(!open.is_empty(), "no save is in the picker");
+        for done in open {
+            done(outcome.clone());
+        }
+    }
+
+    fn dirty(app: &SlideApp) -> bool {
+        app.session.active().unwrap().is_dirty()
+    }
+
+    /// The browser's save picker: the presentation is saved once the file is written, not when the
+    /// picker opens.
+    #[test]
+    fn picker_save_marks_the_presentation_saved_when_written() {
+        let (mut app, calls) = picker_app();
+        app.save();
+        assert_eq!(calls.borrow().len(), 1);
+        assert!(calls.borrow()[0].0.ends_with(".pptx"), "{}", calls.borrow()[0].0);
+        assert!(calls.borrow()[0].1.starts_with(b"PK"));
+        assert!(dirty(&app), "nothing is written while the picker is open");
+        assert!(app.has_unsaved_changes());
+        assert!(!app.save_all(), "a save still in the picker isn't saved");
+        settle(&calls, SaveOutcome::Saved);
+        app.settle_saves();
+        assert!(!dirty(&app));
+        assert!(!app.has_unsaved_changes());
+    }
+
+    #[test]
+    fn picker_save_cancelled_or_failed_keeps_the_changes_unsaved() {
+        let (mut app, calls) = picker_app();
+        app.save();
+        settle(&calls, SaveOutcome::Cancelled);
+        app.settle_saves();
+        assert!(dirty(&app));
+        assert!(app.status.is_none(), "cancelling isn't an error");
+        assert!(app.has_unsaved_changes());
+
+        app.save();
+        settle(&calls, SaveOutcome::Failed("disk full".into()));
+        app.settle_saves();
+        assert!(dirty(&app));
+        let status = app.status.as_ref().map(|s| s.0.clone()).unwrap_or_default();
+        assert!(status.contains("disk full"), "{status}");
+    }
+
+    /// Edits made while the picker is open aren't in the file: they stay unsaved, and undoing them
+    /// gets back to the saved presentation.
+    #[test]
+    fn edits_during_a_picker_save_stay_unsaved() {
+        let (mut app, calls) = picker_app();
+        app.save();
+        app.run("slide.new", json!({})).unwrap();
+        settle(&calls, SaveOutcome::Saved);
+        app.settle_saves();
+        assert!(dirty(&app), "the new slide isn't in the saved file");
+        app.run("edit.undo", json!({})).unwrap();
+        assert!(!dirty(&app));
+    }
+
+    /// Without a picker the host downloads at once and says so straight away.
+    #[test]
+    fn a_host_without_a_picker_saves_at_once() {
+        let services = Services {
+            save_file: Some(Box::new(|_: &str, _: &[u8], done: SaveDone| done(SaveOutcome::Saved))),
+            download: Some(Box::new(|_: &str, _: &[u8]| {})),
+            ..Default::default()
+        };
+        let mut app = SlideApp::new(Session::with_new(), services);
+        app.run("slide.new", json!({})).unwrap();
+        assert!(app.save_all());
+        assert!(!dirty(&app));
+    }
+
+    /// Close › Save with the picker open keeps the presentation until the file is written.
+    #[test]
+    fn close_prompt_keeps_the_presentation_while_the_picker_is_open() {
+        use egui_kittest::kittest::Queryable;
+        let (mut app, calls) = picker_app();
+        app.close_presentation();
+        let mut harness = egui_kittest::Harness::builder().with_size(egui::vec2(1200.0, 800.0)).build_ui_state(
+            |ui, app: &mut SlideApp| {
+                app.logic(ui.ctx());
+                app.ui(ui);
+            },
+            app,
+        );
+        harness.run_steps(3);
+        harness.get_by_label("Save").click();
+        harness.run_steps(3);
+        assert_eq!(calls.borrow().len(), 1, "the picker opened");
+        assert_eq!(harness.state().session.documents().len(), 1, "still open while the picker is");
+        settle(&calls, SaveOutcome::Saved);
+        harness.run_steps(2);
+        assert!(!harness.state().session.documents()[0].is_dirty(), "settled by the next frame");
     }
 
     #[test]

@@ -101,6 +101,35 @@ fn japanese_conversion_shows_the_active_part() {
     assert_eq!(undo_len(h.state()), undo0 + 1);
 }
 
+/// Vietnamese Telex in a browser: eframe's text agent sends "a" then "s" as Text("a"), a
+/// DeleteSurrounding taking the a back, and Text("á"). The slide reads "á", not "aá", and one
+/// undo goes back to "a". Composing input methods send a preedit and a commit instead.
+#[test]
+fn telex_replacements_in_a_slide_text_box() {
+    let mut h = harness(Session::with_new());
+    let title = h.state().session.active().unwrap().doc.slides[0].shapes[0].id.0;
+    h.state_mut().run("text.edit", json!({"id": title})).unwrap();
+    h.run_steps(1);
+    let delete_one = || Event::Ime(ImeEvent::DeleteSurrounding { before_chars: 1, after_chars: 0 });
+    h.event(Event::Text("a".into()));
+    h.event(delete_one());
+    h.event(Event::Text("á".into()));
+    h.run_steps(2);
+    assert_eq!(title_text(h.state()), "á");
+    let undo0 = undo_len(h.state());
+
+    h.event(Event::Text("e".into()));
+    h.event(delete_one());
+    h.event(preedit("ê"));
+    h.event(Event::Ime(ImeEvent::Commit("ê".into())));
+    h.run_steps(2);
+    assert_eq!(title_text(h.state()), "áê");
+    assert_eq!(undo_len(h.state()), undo0 + 2, "the typed e, then its replacement");
+    h.state_mut().run("edit.undo", json!({})).unwrap();
+    h.run_steps(1);
+    assert_eq!(title_text(h.state()), "áe");
+}
+
 /// Typing on a selected (not edited) shape with an input method replaces its text, as typing does;
 /// the input method is on for it.
 #[test]

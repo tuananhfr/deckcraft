@@ -751,6 +751,105 @@ fn ime_on_a_selected_shape_replaces_its_text() {
     assert_eq!(s.commit_text("x").unwrap()["handled"], false);
 }
 
+/// Vietnamese Telex in a browser: the input method takes back letters it already typed (a + s →
+/// á, Viêt + j → Việt) with a DeleteSurrounding, then sends the replacement. The text reads as
+/// typed, and each replacement is one undo step with what it took back.
+#[test]
+fn ime_delete_surrounding_replaces_typed_text_as_one_undo_step() {
+    let mut s = session();
+    s.prefs.autocorrect = false;
+    let title = s.doc().unwrap().current_slide().unwrap().shapes[0].id.0;
+    s.execute("text.edit", &json!({"id": title})).unwrap();
+    let undo0 = s.doc().unwrap().history.undo.len();
+    s.type_text("a").unwrap();
+    s.delete_surrounding(1, 0).unwrap();
+    s.type_text("á").unwrap();
+    assert_eq!(title_text(&s), "á");
+    assert!(s.doc().unwrap().composition.is_none());
+    assert_eq!(s.doc().unwrap().history.undo.len(), undo0 + 2, "the typed a, then its replacement");
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(title_text(&s), "a", "one undo brings back what was taken back");
+    s.execute("edit.redo", &json!({})).unwrap();
+    assert_eq!(title_text(&s), "á");
+
+    // Characters, not bytes: two letters taken back after a precomposed ê.
+    s.execute("text.set", &json!({"id": title, "text": "Viêt"})).unwrap();
+    s.execute("text.edit", &json!({"id": title, "end": true})).unwrap();
+    s.delete_surrounding(2, 0).unwrap();
+    s.type_text("ệt").unwrap();
+    assert_eq!(title_text(&s), "Việt");
+    assert_eq!(s.doc().unwrap().selection.text.as_ref().unwrap().caret, (0, 4));
+
+    // Android's Backspace is a DeleteSurrounding with an empty replacement: just the deletion.
+    let n = s.doc().unwrap().history.undo.len();
+    s.delete_surrounding(1, 0).unwrap();
+    s.type_text("").unwrap();
+    assert_eq!(title_text(&s), "Việ");
+    assert_eq!(s.doc().unwrap().history.undo.len(), n + 1);
+}
+
+/// The same while composing: the input method takes back text before its preedit; the commit is
+/// one undo step with the deletion, and cancelling the preedit keeps the deletion.
+#[test]
+fn ime_delete_surrounding_while_composing() {
+    let mut s = session();
+    let title = s.doc().unwrap().current_slide().unwrap().shapes[0].id.0;
+    s.execute("text.edit", &json!({"id": title})).unwrap();
+    s.execute("text.insert", &json!({"text": "Vi"})).unwrap();
+    let undo0 = s.doc().unwrap().history.undo.len();
+    s.compose_text("ê", None).unwrap();
+    s.delete_surrounding(1, 0).unwrap();
+    assert_eq!(title_text(&s), "Vê", "the letter before the preedit goes");
+    assert_eq!(s.doc().unwrap().composition.as_ref().unwrap().start, (0, 1));
+    s.compose_text("ế", None).unwrap();
+    s.commit_text("ế").unwrap();
+    assert_eq!(title_text(&s), "Vế");
+    assert_eq!(s.doc().unwrap().history.undo.len(), undo0 + 1);
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(title_text(&s), "Vi");
+
+    // Text("a"), DeleteSurrounding, Preedit, Commit: as typed, one step for the replacement.
+    s.execute("text.set", &json!({"id": title, "text": ""})).unwrap();
+    s.execute("text.edit", &json!({"id": title})).unwrap();
+    s.type_text("a").unwrap();
+    let n = s.doc().unwrap().history.undo.len();
+    s.delete_surrounding(1, 0).unwrap();
+    s.compose_text("á", None).unwrap();
+    s.commit_text("á").unwrap();
+    assert_eq!(title_text(&s), "á");
+    assert_eq!(s.doc().unwrap().history.undo.len(), n + 1);
+
+    // A preedit cancelled after a deletion: the deletion stays, the preedit goes.
+    s.delete_surrounding(1, 0).unwrap();
+    s.compose_text("x", None).unwrap();
+    s.compose_text("", None).unwrap();
+    assert_eq!(title_text(&s), "");
+    assert!(s.doc().unwrap().composition.is_none());
+}
+
+/// After the insertion point too, never past the paragraph; nothing when no text is edited.
+#[test]
+fn ime_delete_surrounding_stays_in_the_paragraph() {
+    let mut s = session();
+    let title = s.doc().unwrap().current_slide().unwrap().shapes[0].id.0;
+    s.execute("text.set", &json!({"id": title, "text": "abc"})).unwrap();
+    s.execute("text.edit", &json!({"id": title, "at": [0, 1]})).unwrap();
+    s.delete_surrounding(1, 1).unwrap();
+    assert_eq!(title_text(&s), "c");
+    assert_eq!(s.doc().unwrap().selection.text.as_ref().unwrap().caret, (0, 0));
+
+    s.execute("text.set", &json!({"id": title, "text": "x\ny"})).unwrap();
+    s.execute("text.edit", &json!({"id": title, "end": true})).unwrap();
+    s.delete_surrounding(5, 9).unwrap();
+    assert_eq!(title_text(&s), "x\n");
+
+    s.execute("text.exit", &json!({})).unwrap();
+    s.select(|_, sel| sel.shapes.clear()).unwrap();
+    let doc = s.doc().unwrap().doc.clone();
+    assert_eq!(s.delete_surrounding(1, 0).unwrap()["handled"], false);
+    assert!(std::sync::Arc::ptr_eq(&doc, &s.doc().unwrap().doc), "nothing changed");
+}
+
 /// #101: the composition is underlined in place, under the composed characters, with a thicker
 /// line under the part being converted.
 #[test]

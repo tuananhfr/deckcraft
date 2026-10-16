@@ -208,6 +208,10 @@ impl Session {
     /// Type text: into the text being edited, or (a shape selected) start editing it.
     pub fn type_text(&mut self, text: &str) -> Result<Value> {
         let st = self.doc()?;
+        if st.composition.as_ref().is_some_and(|c| c.deleted && c.len == 0) {
+            // The text an input method just took back is replaced in the same undo step.
+            return self.commit_text(text);
+        }
         if st.selection.text.is_none() {
             let Some(id) = st.selection.shapes.first().copied() else { return Ok(json!({"handled": false})) };
             if st.selection.shapes.len() != 1 {
@@ -240,6 +244,15 @@ impl Session {
             return Ok(json!({"handled": false}));
         }
         self.execute("text.commit", &json!({"text": text}))
+    }
+
+    /// An input method takes back `before` characters before the insertion point and `after`
+    /// after it (`text.deleteSurrounding`). Nothing happens when no text is being edited.
+    pub fn delete_surrounding(&mut self, before: usize, after: usize) -> Result<Value> {
+        if !self.active().is_some_and(|d| d.selection.text.is_some()) {
+            return Ok(json!({"handled": false}));
+        }
+        self.execute("text.deleteSurrounding", &json!({"before": before, "after": after}))
     }
 
     /// Ready to take typed `text`: editing text already, or one selected shape whose text editing

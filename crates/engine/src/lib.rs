@@ -155,6 +155,9 @@ pub struct Composition {
     /// The presentation and selection before the composition began.
     pub before: Arc<Presentation>,
     pub before_selection: Selection,
+    /// The input method took back text around it (`text.deleteSurrounding`): cancelling keeps
+    /// that deletion, and with nothing composed yet, typed text is its replacement.
+    pub deleted: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -438,7 +441,7 @@ impl Session {
     fn execute_unguarded(&mut self, id: &str, params: &Value) -> Result<Value> {
         let spec = find_command(id).ok_or_else(|| EngineError::UnknownCommand(id.into()))?;
         // Any other edit (or a click, a key, undo) settles an input method's composition first.
-        if self.depth == 0 && (spec.journal || spec.undoable) && !matches!(id, "text.compose" | "text.commit") {
+        if self.depth == 0 && (spec.journal || spec.undoable) && !matches!(id, "text.compose" | "text.commit" | "text.deleteSurrounding") {
             self.end_composition();
         }
         if let Err(e) = (spec.enabled)(self) {

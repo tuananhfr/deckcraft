@@ -38,6 +38,15 @@ pub fn specs() -> Vec<CommandSpec> {
             has_text,
             commit
         ),
+        cmd!(
+            noundo "text.deleteSurrounding",
+            "Delete Around Insertion Point",
+            [],
+            None,
+            "{before?: n, after?: n} — the input method takes back characters before and after the insertion point (or its composition), within the paragraph; the replacement it sends next is the same undo step",
+            has_text,
+            delete_surrounding
+        ),
         cmd!(noundo "text.move", "Move Insertion Point", [], None, "{to: left|right|up|down|wordLeft|wordRight|lineStart|lineEnd|paraStart|paraEnd|start|end, extend?: bool}", has_text, move_caret),
         cmd!(
             "text.delete",
@@ -445,8 +454,22 @@ fn compose(s: &mut Session, p: &Value) -> Result<Value> {
                 t.caret = c;
                 (at, props)
             })?;
-            s.doc_mut()?.composition = Some(crate::Composition { start, len: n, active, props, before, before_selection });
+            s.doc_mut()?.composition = Some(crate::Composition { start, len: n, active, props, before, before_selection, deleted: false });
             Ok(json!({"composing": true, "start": [start.0, start.1], "len": n}))
+        }
+        Some(c) if text.is_empty() && c.deleted => {
+            // The input method already deleted that text on its side; restoring it would put back
+            // characters it no longer knows about.
+            let (start, len) = (c.start, c.len);
+            if len > 0 {
+                edit_text(s, |body, t| {
+                    ed::delete(body, start, (start.0, start.1 + len));
+                    t.anchor = start;
+                    t.caret = start;
+                })?;
+            }
+            s.end_composition();
+            Ok(json!({"composing": false}))
         }
         Some(c) if text.is_empty() => {
             let st = s.doc_mut()?;
@@ -480,6 +503,61 @@ fn commit(s: &mut Session, p: &Value) -> Result<Value> {
     s.end_composition();
     let caret = s.doc()?.selection.text.as_ref().map(|t| t.caret).unwrap_or_default();
     Ok(json!({"caret": [caret.0, caret.1]}))
+}
+
+/// `text.deleteSurrounding`: an input method takes back characters it already put in (Telex turns
+/// a + s into á, phone keyboards correct a word) before sending their replacement. Counted around
+/// the insertion point, or the composition while there is one, as egui's text fields do; kept
+/// within the paragraph because the browser's hidden input never holds a paragraph break.
+fn delete_surrounding(s: &mut Session, p: &Value) -> Result<Value> {
+    let count = |key: &str| p.get(key).and_then(Value::as_u64).map_or(0, |n| usize::try_from(n).unwrap_or(usize::MAX));
+    let (before, after) = (count("before"), count("after"));
+    let current = s.doc()?.composition.clone();
+    let current = match current {
+        Some(c) if !composition_fits(s.doc()?, &c) => {
+            s.end_composition();
+            None
+        }
+        c => c,
+    };
+    let st = s.doc()?;
+    let t = st.selection.text.clone().ok_or_else(|| bad("text.deleteSurrounding", "no text insertion point"))?;
+    let Some(body) = body_of(st, &t) else { return Ok(json!({"deleted": 0})) };
+    let (a, b) = match &current {
+        Some(c) => (c.start, (c.start.0, c.start.1 + c.len)),
+        None => t.ordered(),
+    };
+    let before_n = before.min(a.1);
+    let after_n = after.min(body.paragraphs.get(b.0).map_or(0, |x| x.char_len()).saturating_sub(b.1));
+    if before_n == 0 && after_n == 0 {
+        return Ok(json!({"deleted": 0}));
+    }
+    // The replacement takes the formatting of the character it replaces.
+    let props = (before_n > 0).then(|| ed::props_at(body, a));
+    let (doc_before, selection_before) = (st.doc.clone(), st.selection.clone());
+    edit_text(s, |body, t| {
+        if after_n > 0 {
+            ed::delete(body, b, (b.0, b.1 + after_n));
+        }
+        if before_n > 0 {
+            ed::delete(body, (a.0, a.1 - before_n), a);
+        }
+        let shift = |q: Pos| if q.0 == a.0 && q.1 >= a.1 { (q.0, q.1 - before_n) } else { q };
+        t.anchor = shift(t.anchor);
+        t.caret = shift(t.caret);
+    })?;
+    let start = (a.0, a.1 - before_n);
+    let st = s.doc_mut()?;
+    match current {
+        Some(c) => st.composition = Some(crate::Composition { start, deleted: true, ..c }),
+        // An empty composition holds the deletion so its replacement joins the same undo step.
+        None if a == b => {
+            st.composition =
+                Some(crate::Composition { start, len: 0, active: None, props, before: doc_before, before_selection: selection_before, deleted: true })
+        }
+        None => crate::push_undo(st, crate::HistoryEntry { label: "Delete Text".into(), doc: doc_before, selection: selection_before }),
+    }
+    Ok(json!({"deleted": before_n + after_n}))
 }
 
 /// Underlines under an input method's composition (#101), in slide coordinates: `(from, to,
