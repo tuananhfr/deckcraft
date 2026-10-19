@@ -13,5 +13,6 @@ win over anything here.
 - Look at UI changes: `deckcraft --sample --control 7990` + `ui.screenshot`, or
   `deckcraft-cli render`.
 - Commit after each landed arc (`M<n>.<k>: what`) and push to `origin main`.
+- Dependency licences, sources and advisories: `cargo deny check` (`deny.toml`, needs `cargo install cargo-deny --locked`); not part of `cargo xtask ci` yet.
 - Keep `ROADMAP.md`, the progress docs in `docs/` (AGENTS.md §7) and `plan/STATUS.md` current.
 - Don't ask the user questions; record genuinely-theirs decisions in `plan/STATUS.md`.

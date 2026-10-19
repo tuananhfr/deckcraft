@@ -1,0 +1,70 @@
+# cargo-deny policy, the same as pdfcraft's. Run with `cargo deny check`.
+# Code dependencies follow the same rule as assets (AGENTS.md): permissive licences only.
+# Copyleft (GPL, AGPL, LGPL, MPL) is never linked.
+
+[graph]
+all-features = true
+
+# Pending a product decision: symphonia (MPL-2.0, used unmodified, via deckcraft-media) fails this
+# check on purpose; no exception until the owner decides.
+[licenses]
+confidence-threshold = 0.9
+allow = [
+    "MIT",
+    "MIT-0",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+    "BSL-1.0",
+    "CC0-1.0",
+]
+
+[licenses.private]
+ignore = true
+
+[bans]
+multiple-versions = "allow"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+# No git dependencies.
+allow-git = []
+
+[advisories]
+yanked = "warn"
+ignore = [
+    # zip 3 extraction bugs (fixed in zip 9). DeckCraft never calls ZipArchive::extract or
+    # ZipStreamReader::extract: packages are opened from memory and read entry by entry, so no
+    # archive path, symlink or Unix mode reaches the file system.
+    { id = "RUSTSEC-2026-0367", reason = "zip extract() is never called; entries are read into memory" },
+    { id = "RUSTSEC-2026-0368", reason = "zip extract() is never called; entries are read into memory" },
+    { id = "RUSTSEC-2026-0369", reason = "zip extract() is never called; entries are read into memory" },
+    # quick-xml 0.38 (fixed in 0.41). deckcraft-pptx parses with a plain Reader (no NsReader) and
+    # reads attributes with `with_checks(false)` (crates/pptx/src/xml.rs), so neither the quadratic
+    # duplicate-name check nor the namespace resolver runs on a deck's XML.
+    { id = "RUSTSEC-2026-0194", reason = "attributes are iterated with_checks(false); no try_get_attribute" },
+    { id = "RUSTSEC-2026-0195", reason = "NsReader / NamespaceResolver are not used" },
+    # Unmaintained (no vulnerability), reached only through krilla's PDF export. No safe upgrade:
+    # it goes away when krilla moves to harfrust/skrifa.
+    { id = "RUSTSEC-2026-0206", reason = "rustybuzz: unmaintained, pulled by krilla (PDF export)" },
+    { id = "RUSTSEC-2026-0192", reason = "ttf-parser: unmaintained, pulled by krilla via rustybuzz (PDF export)" },
+    # zbus 5's helper crates, merged into zbus 6 (unmaintained, no vulnerability). Linux/BSD desktop
+    # D-Bus only, through accesskit_unix (egui-winit's AT-SPI). Not in the wasm build. Revisit when
+    # accesskit moves to zbus 6.
+    { id = "RUSTSEC-2026-0370", reason = "zvariant: unmaintained, Linux/BSD-only D-Bus via zbus 5" },
+    { id = "RUSTSEC-2026-0371", reason = "zbus_names: unmaintained, Linux/BSD-only D-Bus via zbus 5" },
+    { id = "RUSTSEC-2026-0372", reason = "zvariant_derive: unmaintained, Linux/BSD-only D-Bus via zbus 5" },
+]
+
+# egui's default UI fonts (Ubuntu-Light, Hack, emoji-icon-font): font licences, not code, and
+# open font licences as the asset rule (AGENTS.md) requires.
+[[licenses.exceptions]]
+crate = "epaint_default_fonts"
+allow = ["OFL-1.1", "Ubuntu-font-1.0"]

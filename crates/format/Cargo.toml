@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 description = "DeckCraft native file format (.deckcraft: zip of a JSON manifest plus media) and outline text import/export"
+publish = false
 
 [lints]
 workspace = true

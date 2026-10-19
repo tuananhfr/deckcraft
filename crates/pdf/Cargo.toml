@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 description = "DeckCraft PDF export (krilla): slides, notes pages and handouts with a selectable text layer, links and bookmarks"
+publish = false
 
 [lints]
 workspace = true
