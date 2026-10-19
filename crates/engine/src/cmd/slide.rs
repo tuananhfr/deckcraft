@@ -15,7 +15,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "slide.new",
             "New Slide",
             ["Home", "Slides"],
-            Some("Cmd+Shift+N"),
+            Some("Cmd+M"),
             "{layout?: layout name or kind (title, titleAndContent, sectionHeader, twoContent, comparison, titleOnly, blank, contentWithCaption, pictureWithCaption), at?: index, title?: text, body?: text}",
             has_doc,
             new

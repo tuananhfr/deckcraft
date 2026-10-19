@@ -13,6 +13,7 @@ pub mod credits;
 pub mod dialogs;
 pub mod drafts;
 pub mod fillui;
+pub mod find;
 pub mod i18n;
 pub mod icons;
 pub mod media;
@@ -20,6 +21,7 @@ pub mod menus;
 pub mod panes;
 pub mod ribbon;
 pub mod selpane;
+pub mod shortcuts;
 pub mod show;
 pub mod sorter;
 pub mod status;
@@ -190,12 +192,15 @@ pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
     ("app.print", "Print", Some("Cmd+P"), "{layout?, perPage?, slides?, includeHidden?, frame?}"),
     ("app.about", "About DeckCraft", None, "{}"),
     ("app.palette", "Command Palette", Some("Cmd+Shift+P"), "{}"),
+    ("app.find", "Find…", Some("Cmd+F"), "{text?}"),
+    ("app.replace", "Replace…", Some("Cmd+H"), "{text?}"),
+    ("app.shortcuts", "Keyboard Shortcuts", Some("F1"), "{}"),
     ("app.preferences", "Preferences…", Some("Cmd+,"), "{}"),
     ("app.openDialog", "Open…", None, "{purpose?}"),
     ("app.insertPictureDialog", "Picture from File…", None, "{}"),
     ("app.insertAudioDialog", "Audio from File…", None, "{}"),
     ("app.insertVideoDialog", "Video from File…", None, "{}"),
-    ("app.saveAsDialog", "Save As…", None, "{}"),
+    ("app.saveAsDialog", "Save As…", Some("F12"), "{}"),
     ("app.exportDialog", "Export…", None, "{}"),
     ("app.dialog", "Open Dialog", None, "{id}"),
     ("app.links", "Project Links", None, "{}"),
@@ -232,6 +237,8 @@ pub struct SlideApp {
     /// Where the canvas texture (the slide and the pasteboard drawn around it) is on screen.
     pub canvas_region: Option<egui::Rect>,
     pub palette: Option<(String, usize)>,
+    /// The Find and Replace window (Ctrl+F, Ctrl+H); it keeps its text while closed.
+    pub find: find::FindState,
     /// Integrated title bar (macOS traffic lights over our chrome).
     pub integrated_titlebar: bool,
     /// The File tab's full-window view (Backstage). Over a presentation it replaces the ribbon,
@@ -294,6 +301,7 @@ impl SlideApp {
             slide_rect: None,
             canvas_region: None,
             palette: None,
+            find: find::FindState::default(),
             integrated_titlebar: false,
             backstage: None,
             pending_urls: vec![],
@@ -585,6 +593,14 @@ impl SlideApp {
             }
             "app.about" => self.dialog = Some(dialogs::Dialog::new("about")),
             "app.palette" => self.palette = Some((String::new(), 0)),
+            "app.find" | "app.replace" => {
+                if self.session.active().is_none() {
+                    return Err("nothing to search: no presentation is open".into());
+                }
+                let text = p.get("text").and_then(Value::as_str).map(str::to_string).or_else(|| find::selected_text(&self.session));
+                self.find.open(id == "app.replace", text);
+            }
+            "app.shortcuts" => self.dialog = Some(dialogs::Dialog::new("shortcuts")),
             "app.preferences" => self.dialog = Some(dialogs::Dialog::new("preferences")),
             "app.openDialog" => self.pick_and_open(),
             "app.insertPictureDialog" => self.pick_and_insert("picture", "insert.picture"),
@@ -987,7 +1003,8 @@ impl SlideApp {
             for e in events {
                 if let egui::Event::Key { key, pressed: true, modifiers, .. } = e {
                     let mods = Mods { shift: modifiers.shift, alt: modifiers.alt, cmd: modifiers.command || modifiers.ctrl };
-                    if backstage::key(self, key, mods) || !(mods.cmd || mods.alt) || menus::ui_shortcut(self, key, mods) {
+                    let f1 = key == egui::Key::F1;
+                    if backstage::key(self, key, mods) || !(mods.cmd || mods.alt || f1) || menus::ui_shortcut(self, key, mods) {
                         continue;
                     }
                     // Engine shortcuts that don't touch the hidden slide (Ctrl+N).
@@ -1113,6 +1130,7 @@ impl SlideApp {
         toast::note_missing_fonts(self);
         toast::show(self, &ctx);
         dialogs::show(self, &ctx);
+        find::show(self, &ctx);
         menus::palette(self, &ctx);
         for url in std::mem::take(&mut self.pending_urls) {
             ctx.open_url(egui::OpenUrl::new_tab(url));

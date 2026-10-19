@@ -6,18 +6,38 @@ use serde_json::{Value, json};
 use crate::tools::Mods;
 use crate::{Result, Session};
 
-/// Does a shortcut like `Cmd+Shift+]` match `key` + `mods`?
-pub fn shortcut_matches(shortcut: &str, key: &str, mods: Mods) -> bool {
+/// Second shortcuts for commands, kept from earlier versions or other platforms (the registry
+/// holds one per command). Checked after the registry.
+pub const EXTRA_SHORTCUTS: &[(&str, &str)] = &[("Cmd+Shift+N", "slide.new")];
+
+/// A shortcut like `Cmd+Shift+]` split into its key, spelled as [`key_token`] spells it, and its
+/// modifiers (`Cmd` and `Ctrl` are the same modifier).
+pub fn parse_shortcut(shortcut: &str) -> Option<(String, Mods)> {
     let parts: Vec<&str> = shortcut.split('+').collect();
     let (k, ms) = match parts.as_slice() {
         [.., "", ""] => ("+", &parts[..parts.len().saturating_sub(2)]),
-        _ => match parts.split_last() {
-            Some((k, ms)) => (*k, ms),
-            None => return false,
-        },
+        _ => {
+            let (k, ms) = parts.split_last()?;
+            (*k, ms)
+        }
     };
     let has = |m: &str| ms.iter().any(|x| x.eq_ignore_ascii_case(m));
-    k.eq_ignore_ascii_case(key) && (has("cmd") || has("ctrl")) == mods.cmd && has("shift") == mods.shift && (has("alt") || has("option")) == mods.alt
+    Some((key_token(k), Mods { shift: has("shift"), alt: has("alt") || has("option"), cmd: has("cmd") || has("ctrl") }))
+}
+
+/// Does a shortcut like `Cmd+Shift+]` match `key` + `mods`?
+pub fn shortcut_matches(shortcut: &str, key: &str, mods: Mods) -> bool {
+    parse_shortcut(shortcut).is_some_and(|(k, m)| k == key_token(key) && m == mods)
+}
+
+/// The command a shortcut key runs when nothing more specific (text editing, nudges, slide
+/// navigation) takes it: the registry's first match, then [`EXTRA_SHORTCUTS`].
+pub fn shortcut_command(key: &str, mods: Mods) -> Option<&'static str> {
+    crate::command_specs()
+        .iter()
+        .find(|c| c.shortcut.is_some_and(|s| shortcut_matches(s, key, mods)))
+        .map(|c| c.id)
+        .or_else(|| EXTRA_SHORTCUTS.iter().find(|(s, _)| shortcut_matches(s, key, mods)).map(|(_, id)| *id))
 }
 
 /// A key name in one spelling: lower case, `ArrowLeft` → `left`, and egui's names for
@@ -153,8 +173,7 @@ impl Session {
             "space" | " " => "Space",
             _ => k,
         };
-        let found = crate::command_specs().iter().find(|c| c.shortcut.is_some_and(|s| shortcut_matches(s, key_name, mods))).map(|c| c.id);
-        if let Some(id) = found {
+        if let Some(id) = shortcut_command(key_name, mods) {
             let r = self.execute(id, &json!({}))?;
             return Ok(json!({"handled": true, "command": id, "result": r}));
         }
@@ -323,6 +342,24 @@ mod tests {
         assert!(shortcut_matches("Cmd+Shift+]", "]", m(true, false, true)));
         assert!(shortcut_matches("Cmd+Shift+.", ".", m(true, false, true)));
         assert!(shortcut_matches("Delete", "Delete", m(false, false, false)));
+    }
+
+    #[test]
+    fn ctrl_m_and_ctrl_shift_n_add_a_slide_even_while_editing_text() {
+        let ctrl = Mods { cmd: true, ..Default::default() };
+        let mut s = Session::with_new();
+        let slides = |s: &Session| s.doc().unwrap().doc.slides.len();
+        assert_eq!(s.key("m", ctrl).unwrap()["command"], "slide.new");
+        assert_eq!(slides(&s), 2);
+        assert_eq!(s.key("N", Mods { shift: true, ..ctrl }).unwrap()["command"], "slide.new");
+        assert_eq!(slides(&s), 3);
+        let title = s.doc().unwrap().current_slide().unwrap().shapes[0].id.0;
+        s.execute("text.edit", &json!({"id": title})).unwrap();
+        assert_eq!(s.key("M", ctrl).unwrap()["command"], "slide.new");
+        assert_eq!(slides(&s), 4);
+        assert_eq!(shortcut_command("m", Mods::default()), None, "plain M types");
+        assert_eq!(parse_shortcut("Cmd+Shift+,"), Some((",".into(), Mods { shift: true, cmd: true, alt: false })));
+        assert_eq!(parse_shortcut("Cmd++"), Some(("+".into(), ctrl)));
     }
 
     #[test]

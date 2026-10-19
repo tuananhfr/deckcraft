@@ -7,67 +7,68 @@ use serde_json::json;
 use crate::SlideApp;
 use crate::theme::{self, Tokens};
 
-/// Shortcuts the UI handles itself (views, show, zoom, palette, file dialogs). True when consumed.
+/// Shortcuts the UI handles itself (views, show, zoom, palette, file dialogs), in the engine's
+/// notation (`Cmd` is Ctrl off the Mac). The first matching row wins and the engine's registry
+/// never sees the key; the Keyboard Shortcuts dialog lists these rows.
+pub const UI_SHORTCUTS: &[(&str, &str)] = &[
+    ("F1", "app.shortcuts"),
+    ("F5", "show.start"),
+    ("Shift+F5", "show.fromCurrent"),
+    ("Cmd+Enter", "show.fromCurrent"),
+    ("Cmd+Shift+Enter", "show.fromStart"),
+    ("Cmd+S", "file.save"),
+    ("Cmd+Shift+S", "app.saveAsDialog"),
+    ("F12", "app.saveAsDialog"),
+    // File tab: Alt+F opens it on Home with the keyboard in its side menu; Ctrl+P on Print.
+    ("Alt+F", "app.backstage"),
+    ("Cmd+P", "app.print"),
+    ("Cmd+W", "app.closePresentation"),
+    ("Cmd+O", "app.openDialog"),
+    ("Cmd+F", "app.find"),
+    ("Cmd+H", "app.replace"),
+    ("Cmd+Shift+P", "app.palette"),
+    // Office's "Tell me" search box.
+    ("Alt+Q", "app.palette"),
+    ("Cmd+,", "app.preferences"),
+    ("Cmd+=", "view.zoomIn"),
+    ("Cmd++", "view.zoomIn"),
+    ("Cmd+-", "view.zoomOut"),
+    ("Cmd+0", "view.fit"),
+    ("Cmd+F1", "view.collapseRibbon"),
+    ("Shift+F9", "view.gridlines"),
+    ("Alt+F9", "view.guides"),
+    ("Cmd+K", "insert.hyperlink"),
+];
+
+/// The command a key runs through [`UI_SHORTCUTS`], if the UI takes it.
+pub fn ui_shortcut_command(key: egui::Key, m: Mods) -> Option<&'static str> {
+    let name = crate::key_name(key);
+    UI_SHORTCUTS.iter().find(|(sc, _)| deckcraft_engine::keys::shortcut_matches(sc, name, m)).map(|(_, id)| *id)
+}
+
+/// Runs a [`UI_SHORTCUTS`] key. True when consumed.
 pub fn ui_shortcut(app: &mut SlideApp, key: egui::Key, m: Mods) -> bool {
-    use egui::Key::*;
-    let id = match (key, m.cmd, m.shift, m.alt) {
-        (F5, _, false, _) => {
-            app.start_show(0, false);
-            return true;
-        }
-        (F5, _, true, _) | (Enter, true, false, false) => {
-            let i = app.session.active().map(|d| d.selection.slide).unwrap_or(0);
-            app.start_show(i, false);
-            return true;
-        }
-        (Enter, true, true, _) => {
-            app.start_show(0, false);
-            return true;
-        }
-        (S, true, false, false) => {
-            app.save();
-            return true;
-        }
-        (S, true, true, false) => "app.saveAsDialog",
-        // File tab: Alt+F opens it on Home with the keyboard in its side menu; Ctrl+P on Print.
-        (F, false, false, true) => {
+    let Some(id) = ui_shortcut_command(key, m) else { return false };
+    match id {
+        // Save writes through the host (a download on the web), which `file.save` alone can't.
+        "file.save" => app.save(),
+        "app.backstage" => {
             app.open_backstage(crate::backstage::Page::Home);
             if let Some(b) = app.backstage.as_mut() {
                 b.focus = Some(0);
             }
-            return true;
         }
-        (P, true, false, false) => {
+        "app.print" => {
             if app.session.active().is_none() {
                 return false;
             }
             app.open_backstage(crate::backstage::Page::Print);
-            return true;
         }
-        (W, true, false, false) => {
-            app.close_presentation();
-            return true;
+        "insert.hyperlink" => app.dialog = Some(crate::dialogs::Dialog::new("hyperlink")),
+        _ => {
+            let _ = app.run(id, json!({}));
         }
-        (O, true, false, false) => "app.openDialog",
-        (P, true, true, false) => "app.palette",
-        (Comma, true, false, false) => "app.preferences",
-        (Equals | Plus, true, false, false) => "view.zoomIn",
-        (Minus, true, false, false) => "view.zoomOut",
-        (Num0, true, false, false) => "view.fit",
-        (F1, true, false, false) => "view.collapseRibbon",
-        (F9, false, true, false) => "view.gridlines",
-        (F9, false, false, true) => "view.guides",
-        (K, true, false, false) => {
-            app.dialog = Some(crate::dialogs::Dialog::new("hyperlink"));
-            return true;
-        }
-        (F, true, false, false) => {
-            app.palette = Some((String::new(), 0));
-            return true;
-        }
-        _ => return false,
-    };
-    let _ = app.run(id, json!({}));
+    }
     true
 }
 
@@ -183,7 +184,8 @@ pub fn menu_tree() -> Vec<(&'static str, Vec<(&'static str, &'static str)>)> {
                 ("Duplicate", "edit.duplicate"),
                 ("Delete Slide", "slide.delete"),
                 ("-", ""),
-                ("Find…", "app.palette"),
+                ("Find…", "app.find"),
+                ("Replace…", "app.replace"),
             ],
         ),
         (
@@ -269,6 +271,6 @@ pub fn menu_tree() -> Vec<(&'static str, Vec<(&'static str, &'static str)>)> {
                 ("Set Up Show…", "show.setup"),
             ],
         ),
-        ("Help", vec![("About DeckCraft", "app.about"), ("Command Palette", "app.palette")]),
+        ("Help", vec![("About DeckCraft", "app.about"), ("Keyboard Shortcuts", "app.shortcuts"), ("Command Palette", "app.palette")]),
     ]
 }

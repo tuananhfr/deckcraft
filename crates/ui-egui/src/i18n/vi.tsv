@@ -464,6 +464,11 @@
 	Fill	Tô màu
 	Fill & Line	Tô màu & Đường
 	Fill Color	Màu Tô
+	Find	Tìm
+	Find Next	Tìm Tiếp
+	Find what:	Tìm gì:
+	Find whole words only	Chỉ tìm toàn bộ từ
+	Find…	Tìm…
 	First	Đầu tiên
 	First Column	Cột Đầu tiên
 	First commit	Commit đầu tiên
@@ -530,6 +535,7 @@
 	Format Shape…	Định dạng Hình…
 	Formatting State	Trạng thái Định dạng
 	forward	tiến
+	Found in the notes of slide {n}.	Tìm thấy trong ghi chú của trang chiếu {n}.
 	Fracture	Nứt vỡ
 	Fragment	Phân mảnh
 	Frame	Khung
@@ -670,6 +676,7 @@
 	JPEG Picture (*.jpg)	Ảnh JPEG (*.jpg)
 	Justify	Căn đều
 	Keeps the layout, fonts and pictures	Giữ nguyên bố trí, phông và ảnh
+	Keyboard Shortcuts	Phím tắt
 	L-Shape	Hình chữ L
 	Language	Ngôn ngữ
 	Last	Cuối cùng
@@ -737,6 +744,7 @@
 	Mark selected text as:	Đánh dấu văn bản đã chọn là:
 	Master Layout	Bố trí Cái
 	Master Views	Dạng xem Cái
+	Match case	Khớp chữ hoa/thường
 	Math	Toán học
 	Matrix	Ma trận
 	Maximize content (else ensure fit)	Phóng to nội dung (nếu không thì bảo đảm vừa khít)
@@ -819,6 +827,7 @@
 	No recent presentations match “{query}”.	Không có bản trình bày gần đây nào khớp với “{query}”.
 	No Reflection	Không Phản chiếu
 	No Shadow	Không Bóng
+	No shortcuts match.	Không có phím tắt nào khớp.
 	No Soft Edges	Không Cạnh Mềm
 	No sound: {error}	Không có âm thanh: {error}
 	No Style, No Grid	Không Kiểu, Không Lưới
@@ -1023,7 +1032,12 @@
 	Reopen	Mở lại
 	Reorder Animation	Sắp xếp lại Hoạt hình
 	Reorder Objects	Sắp xếp lại Đối tượng
+	Replace	Thay thế
+	Replace All	Thay thế Tất cả
 	Replace straight quotes with smart quotes	Thay dấu ngoặc kép thẳng bằng ngoặc kép cong
+	Replace with:	Thay thế bằng:
+	Replaced {count} occurrences.	Đã thay thế {count} chỗ.
+	Replace…	Thay thế…
 	Reply	Trả lời
 	Reply…	Trả lời…
 	Reset	Đặt lại
@@ -1095,6 +1109,7 @@
 	Search commands…	Tìm kiếm lệnh…
 	Search for a file	Tìm kiếm tệp
 	Search for themes	Tìm kiếm chủ đề
+	Search shortcuts…	Tìm kiếm phím tắt…
 	Section	Phần
 	Seek	Tua
 	Select	Chọn
@@ -1278,6 +1293,7 @@
 	The current slide as a compressed picture	Trang chiếu hiện tại dưới dạng ảnh nén
 	The current slide as a picture	Trang chiếu hiện tại dưới dạng ảnh
 	The presentation keeps its own file	Bản trình bày vẫn giữ tệp riêng
+	The search text wasn't found.	Không tìm thấy nội dung cần tìm.
 	The slide titles and bullet text as plain text	Tiêu đề trang chiếu và văn bản dấu đầu dòng dưới dạng văn bản thuần
 	The spelling check is complete. No issues found.	Đã kiểm tra chính tả xong. Không tìm thấy lỗi nào.
 	The version, the people and models who built it, and where to find us.	Phiên bản, những người và mô hình đã tạo nên sản phẩm, và nơi tìm đến chúng tôi.

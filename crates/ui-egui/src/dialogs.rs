@@ -55,6 +55,7 @@ fn title(id: &str) -> &'static str {
         "chartData" => "Chart Data",
         "trim" => "Trim Media",
         "smartart" => "Choose a SmartArt Graphic",
+        "shortcuts" => "Keyboard Shortcuts",
         "quit" => "DeckCraft",
         _ => "DeckCraft",
     }
@@ -125,6 +126,7 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
         let _ = app.run(id, p);
     };
     match d.id.as_str() {
+        "shortcuts" => crate::shortcuts::body(app, ui, d),
         "table" => {
             field(ui, d, "Number of columns:", "cols", "5");
             field(ui, d, "Number of rows:", "rows", "2");
