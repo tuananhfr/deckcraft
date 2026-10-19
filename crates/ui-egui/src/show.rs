@@ -388,7 +388,7 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
         painter.text(
             pos2(full.center().x, full.min.y + 40.0),
             Align2::CENTER_CENTER,
-            "End of slide show, click to exit.",
+            crate::tl!("End of slide show, click to exit."),
             theme::font(18.0),
             Color32::from_gray(200),
         );
@@ -597,7 +597,10 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
         painter.text(
             pos2(bar.min.x + 14.0, bar.center().y),
             Align2::LEFT_CENTER,
-            format!("Slide {} of {}", show.state.slide + 1, doc.slides.len()),
+            crate::i18n::fmt(
+                crate::tl!("Slide {n} of {total}"),
+                &[("n", &(show.state.slide + 1).to_string()), ("total", &doc.slides.len().to_string())],
+            ),
             theme::font(12.0),
             Color32::from_gray(200),
         );
@@ -606,7 +609,7 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
                 .max_rect(Rect::from_min_max(pos2(bar.max.x - 260.0, bar.min.y), bar.max))
                 .layout(egui::Layout::right_to_left(egui::Align::Center)),
         );
-        if child.button("Close").clicked() {
+        if child.button(crate::tl!("Close")).clicked() {
             keep = false;
         }
         if child.button("▶").clicked() {
@@ -635,13 +638,13 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
                 keep = false;
             }
         }
-        if b(&mut child, if show.pen { "✏ on" } else { "✏" }).clicked() {
+        if b(&mut child, if show.pen { crate::tl!("✏ on") } else { "✏" }).clicked() {
             show.pen = !show.pen;
         }
         if b(&mut child, "⬛").clicked() {
             show.blank = Some(Color32::BLACK);
         }
-        if b(&mut child, "End").clicked() {
+        if b(&mut child, crate::tl!("End")).clicked() {
             keep = false;
         }
         ctx.request_repaint_after(std::time::Duration::from_millis(300));
@@ -654,7 +657,13 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
         painter.text(
             r.center(),
             Align2::CENTER_CENTER,
-            format!("Slide {:02}:{:04.1}   Total {:02}:{:02}", (t / 60.0) as u32, t % 60.0, (total / 60.0) as u32, (total % 60.0) as u32),
+            crate::i18n::fmt(
+                crate::tl!("Slide {slide}   Total {total}"),
+                &[
+                    ("slide", &format!("{:02}:{:04.1}", (t / 60.0) as u32, t % 60.0)),
+                    ("total", &format!("{:02}:{:02}", (total / 60.0) as u32, (total % 60.0) as u32)),
+                ],
+            ),
             theme::font(13.0),
             Color32::WHITE,
         );
@@ -792,7 +801,7 @@ fn presenter_window(ctx: &egui::Context, show: &mut Show, doc: &Presentation, no
     let mut actions = vec![];
     ctx.show_viewport_immediate(
         egui::ViewportId::from_hash_of("deckcraft_presenter"),
-        egui::ViewportBuilder::default().with_title("Presenter View — DeckCraft").with_inner_size([1100.0, 700.0]),
+        egui::ViewportBuilder::default().with_title(crate::tl!("Presenter View — DeckCraft")).with_inner_size([1100.0, 700.0]),
         |ui, _| {
             egui::CentralPanel::default().frame(egui::Frame::NONE.fill(Color32::from_gray(24)).inner_margin(egui::Margin::same(16))).show(ui, |ui| {
                 ui.horizontal(|ui| {
@@ -807,15 +816,22 @@ fn presenter_window(ctx: &egui::Context, show: &mut Show, doc: &Presentation, no
                         .color(Color32::WHITE),
                     );
                     ui.add_space(20.0);
-                    ui.label(egui::RichText::new(format!("Slide {} of {}", cur + 1, doc.slides.len())).size(16.0).color(Color32::from_gray(200)));
+                    ui.label(
+                        egui::RichText::new(crate::i18n::fmt(
+                            crate::tl!("Slide {n} of {total}"),
+                            &[("n", &(cur + 1).to_string()), ("total", &doc.slides.len().to_string())],
+                        ))
+                        .size(16.0)
+                        .color(Color32::from_gray(200)),
+                    );
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button("End Show").clicked() {
+                        if ui.button(crate::tl!("End Show")).clicked() {
                             *keep = false;
                         }
-                        if ui.button("Next ▶").clicked() {
+                        if ui.button(crate::tl!("Next ▶")).clicked() {
                             actions.push(show.state.next(doc));
                         }
-                        if ui.button("◀ Previous").clicked() {
+                        if ui.button(crate::tl!("◀ Previous")).clicked() {
                             actions.push(show.state.prev(doc));
                         }
                     });
@@ -833,20 +849,30 @@ fn presenter_window(ctx: &egui::Context, show: &mut Show, doc: &Presentation, no
                     right.min + vec2(0.0, 22.0),
                     vec2(right.width(), right.width() * (doc.slide_size.height / doc.slide_size.width.max(1.0)) as f32),
                 );
-                ui.painter().text(right.min, Align2::LEFT_TOP, "Next", theme::font(13.0), Color32::from_gray(170));
+                ui.painter().text(right.min, Align2::LEFT_TOP, crate::tl!("Next"), theme::font(13.0), Color32::from_gray(170));
                 match &next_tex {
                     Some(t) => {
                         ui.painter().image(t.id(), nr, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
                     }
                     None => {
                         ui.painter().rect_filled(nr, CornerRadius::ZERO, Color32::from_gray(40));
-                        ui.painter().text(nr.center(), Align2::CENTER_CENTER, "End of slide show", theme::font(13.0), Color32::from_gray(170));
+                        ui.painter().text(
+                            nr.center(),
+                            Align2::CENTER_CENTER,
+                            crate::tl!("End of slide show"),
+                            theme::font(13.0),
+                            Color32::from_gray(170),
+                        );
                     }
                 }
                 let notes_rect = Rect::from_min_max(pos2(right.min.x, nr.max.y + 16.0), right.max);
                 let mut child = ui.new_child(egui::UiBuilder::new().max_rect(notes_rect));
                 egui::ScrollArea::vertical().show(&mut child, |ui| {
-                    ui.label(egui::RichText::new(if notes.is_empty() { "No notes." } else { &notes }).size(18.0).color(Color32::from_gray(230)));
+                    ui.label(
+                        egui::RichText::new(if notes.is_empty() { crate::tl!("No notes.") } else { &notes })
+                            .size(18.0)
+                            .color(Color32::from_gray(230)),
+                    );
                 });
             });
             if ui.input(|i| i.viewport().close_requested()) {

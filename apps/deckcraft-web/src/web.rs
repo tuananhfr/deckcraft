@@ -48,6 +48,8 @@ pub fn start() {
                     }
                     let inbox: Inbox = Inbox::default();
                     let mut app = SlideApp::new(Session::new(), services(inbox.clone(), cc.egui_ctx.clone()));
+                    app.ui.language = crate::language::initial();
+                    let language = app.ui.language.clone();
                     let q = query();
                     if !q.contains("blank") {
                         if let Err(e) = deckcraft_engine::sample::open_sample(&mut app.session) {
@@ -59,7 +61,7 @@ pub fn start() {
                     if q.contains("show") {
                         app.start_show(0, false);
                     }
-                    Ok(Box::new(WebShell { app, inbox, dirty, drafts: DraftBridge::new() }))
+                    Ok(Box::new(WebShell { app, inbox, dirty, drafts: DraftBridge::new(), language }))
                 }),
             )
             .await;
@@ -84,6 +86,8 @@ struct WebShell {
     /// Read by the `beforeunload` guard, which can't reach the app.
     dirty: Rc<Cell<bool>>,
     drafts: DraftBridge,
+    /// The interface language last remembered, to save it only when it changes.
+    language: String,
 }
 
 impl eframe::App for WebShell {
@@ -105,6 +109,10 @@ impl eframe::App for WebShell {
         }
         self.app.logic(ctx);
         self.drafts.logic(&mut self.app, ctx);
+        if self.app.ui.language != self.language {
+            self.language.clone_from(&self.app.ui.language);
+            crate::language::remember(&self.language);
+        }
     }
 
     fn raw_input_hook(&mut self, _ctx: &egui::Context, raw: &mut egui::RawInput) {

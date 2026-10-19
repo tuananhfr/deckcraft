@@ -13,6 +13,7 @@ pub mod credits;
 pub mod dialogs;
 pub mod drafts;
 pub mod fillui;
+pub mod i18n;
 pub mod icons;
 pub mod media;
 pub mod menus;
@@ -28,6 +29,14 @@ pub mod thumbs;
 pub mod toast;
 pub mod uifonts;
 pub mod widgets;
+
+/// An English UI string in the current interface language ([`i18n::t`]).
+#[macro_export]
+macro_rules! tl {
+    ($s:expr) => {
+        $crate::i18n::t($s)
+    };
+}
 
 use std::sync::mpsc::{Receiver, Sender};
 
@@ -119,6 +128,8 @@ pub struct UiState {
     /// Format Shape pane: tab (`fill`, `effects`, `size`, `picture`, `text`).
     pub format_tab: String,
     pub grayscale: bool,
+    /// Interface language code (`en`, `vi`); unknown codes show English.
+    pub language: String,
 }
 
 impl Default for UiState {
@@ -144,6 +155,7 @@ impl Default for UiState {
             ui_scale: 1.0,
             format_tab: "fill".into(),
             grayscale: false,
+            language: "en".into(),
         }
     }
 }
@@ -168,6 +180,7 @@ pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
     ("view.collapseRibbon", "Collapse the Ribbon", Some("Cmd+F1"), "{}"),
     ("view.dark", "Dark Mode", None, "{on?: bool}"),
     ("view.grayscale", "Grayscale", None, "{on?: bool}"),
+    ("view.language", "Interface Language", None, "{language: en|vi}"),
     ("show.start", "Slide Show", Some("F5"), "{from?: index}"),
     ("show.presenter", "Presenter View", None, "{on?: bool}"),
     ("show.end", "End Show", None, "{}"),
@@ -399,7 +412,7 @@ impl SlideApp {
             "outline" | "txt" => ("txt", "outline", false),
             "deckcraft" => ("deckcraft", "deckcraft", false),
             other => {
-                self.set_status(format!("DeckCraft can't export “{other}”"));
+                self.set_status(crate::i18n::fmt(crate::tl!("DeckCraft can't export “{format}”"), &[("format", other)]));
                 return false;
             }
         };
@@ -412,7 +425,7 @@ impl SlideApp {
             }
             return match self.run("file.export", params) {
                 Ok(_) => {
-                    self.set_status(format!("Exported {path}"));
+                    self.set_status(crate::i18n::fmt(crate::tl!("Exported {path}"), &[("path", path.as_str())]));
                     true
                 }
                 Err(_) => false,
@@ -443,7 +456,7 @@ impl SlideApp {
                 false
             }
             (Ok(_), None) => {
-                self.set_status("Saving a copy needs a file picker, which this window doesn't have.");
+                self.set_status(crate::tl!("Saving a copy needs a file picker, which this window doesn't have."));
                 false
             }
         }
@@ -469,7 +482,7 @@ impl SlideApp {
         match self.run("file.export", params) {
             Ok(_) => {
                 self.open_url(&format!("file:///{}", path.replace('\\', "/").trim_start_matches('/')));
-                self.set_status("Opened the presentation as a PDF to print");
+                self.set_status(crate::tl!("Opened the presentation as a PDF to print"));
                 true
             }
             Err(_) => false,
@@ -526,6 +539,11 @@ impl SlideApp {
                 self.restyle = true;
             }
             "view.grayscale" => self.ui.grayscale = self.flag(p, self.ui.grayscale),
+            "view.language" => {
+                let code = p.get("language").and_then(Value::as_str).ok_or("missing `language`")?;
+                let lang = i18n::Lang::from_code(code).ok_or("unknown `language` (use en or vi)")?;
+                self.ui.language = lang.code().to_string();
+            }
             "show.start" => {
                 let from = p.get("from").and_then(Value::as_u64).map(|v| v as usize).unwrap_or(0);
                 self.start_show(from, false);
@@ -640,7 +658,7 @@ impl SlideApp {
             if let Some(path) = pick(&suggested) {
                 match self.session.execute("file.saveAs", &json!({"path": path})) {
                     Ok(_) => {
-                        self.set_status(format!("Saved {path}"));
+                        self.set_status(crate::i18n::fmt(crate::tl!("Saved {path}"), &[("path", path.as_str())]));
                         self.ui.recent.retain(|p| *p != path);
                         self.ui.recent.insert(0, path);
                     }
@@ -698,7 +716,8 @@ impl SlideApp {
             match outcome {
                 SaveOutcome::Saved => self.mark_saved(p.uid, p.written),
                 SaveOutcome::Cancelled => {}
-                SaveOutcome::Failed(e) => self.set_status(format!("Couldn't save {}: {e}", p.name)),
+                SaveOutcome::Failed(e) => self
+                    .set_status(crate::i18n::fmt(crate::tl!("Couldn't save {name}: {error}"), &[("name", p.name.as_str()), ("error", e.as_str())])),
             }
         }
     }
@@ -748,7 +767,7 @@ impl SlideApp {
     pub fn save(&mut self) {
         if self.session.active().and_then(|d| d.path.clone()).is_some() {
             match self.session.execute("file.save", &json!({})) {
-                Ok(_) => self.set_status("Saved"),
+                Ok(_) => self.set_status(crate::tl!("Saved")),
                 Err(e) => self.set_status(e.to_string()),
             }
         } else {
@@ -812,7 +831,7 @@ impl SlideApp {
         } else if lower.ends_with(".txt") || lower.ends_with(".md") {
             "slide.fromOutline"
         } else {
-            self.set_status(format!("{name}: DeckCraft can't open this kind of file"));
+            self.set_status(crate::i18n::fmt(crate::tl!("{name}: DeckCraft can't open this kind of file"), &[("name", name)]));
             return;
         };
         let p = if cmd == "slide.fromOutline" { json!({"text": String::from_utf8_lossy(bytes)}) } else { json!({"name": name, "data": data}) };
@@ -826,6 +845,7 @@ impl SlideApp {
 
     /// Per-frame logic before layout: styles, control requests, screenshots, shortcuts.
     pub fn logic(&mut self, ctx: &egui::Context) {
+        i18n::set_current(i18n::Lang::from_pref(&self.ui.language));
         let scale = self.ui.ui_scale.clamp(0.5, 3.0);
         if (ctx.zoom_factor() - scale).abs() > 1e-3 {
             ctx.set_zoom_factor(scale);
@@ -874,7 +894,7 @@ impl SlideApp {
             if self.session.documents().iter().any(|d| d.is_dirty())
                 && let Err(e) = self.session.execute("file.recovery.save", &json!({}))
             {
-                self.set_status(format!("Couldn't save AutoRecover information: {e}"));
+                self.set_status(crate::i18n::fmt(crate::tl!("Couldn't save AutoRecover information: {error}"), &[("error", &e.to_string())]));
             }
         }
         // On the web, dropped files can only be read asynchronously: the host reads them and
@@ -1038,6 +1058,7 @@ impl SlideApp {
 
     /// Lay out the whole window.
     pub fn ui(&mut self, ui: &mut egui::Ui) {
+        i18n::set_current(i18n::Lang::from_pref(&self.ui.language));
         let ctx = ui.ctx().clone();
         if !self.fonts_ready {
             ctx.request_repaint();

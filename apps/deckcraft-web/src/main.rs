@@ -10,7 +10,8 @@
 //!   asynchronously through `Services::inbox` (presentations open, media is inserted);
 //! - Save and Export trigger a browser download;
 //! - dropped files are read asynchronously by `web::WebShell` and delivered through the inbox;
-//! - preferences are not persisted;
+//! - preferences are not persisted, except the interface language (`language`), which the
+//!   ERPCons office site shares between its editors;
 //! - no AutoRecover folder: where the page provides a draft store (`window.erpDrafts`, the
 //!   ERPCons office site), unsaved presentations are kept there instead (`draft_bridge`).
 //!
@@ -21,6 +22,8 @@
 
 #[cfg(target_arch = "wasm32")]
 mod draft_bridge;
+#[cfg(target_arch = "wasm32")]
+mod language;
 #[cfg(target_arch = "wasm32")]
 mod web;
 

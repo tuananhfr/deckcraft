@@ -15,16 +15,22 @@ pub fn status_bar(app: &mut SlideApp, ui: &mut Ui) {
         let Some(st) = app.session.active() else { return };
         let n = st.doc.slides.len();
         let left = match st.selection.target {
-            deckcraft_engine::Target::Slides => format!("Slide {} of {}", (st.selection.slide + 1).min(n.max(1)), n),
-            _ => "Slide Master".to_string(),
+            deckcraft_engine::Target::Slides => crate::i18n::fmt(
+                crate::tl!("Slide {n} of {total}"),
+                &[("n", &(st.selection.slide + 1).min(n.max(1)).to_string()), ("total", &n.to_string())],
+            ),
+            _ => crate::tl!("Slide Master").to_string(),
         };
         let p = ui.painter();
-        p.text(pos2(rect.min.x + 14.0, rect.center().y), Align2::LEFT_CENTER, &left, theme::font(12.0), t.text_dim);
-        p.text(pos2(rect.min.x + 120.0, rect.center().y), Align2::LEFT_CENTER, "English (United States)", theme::font(12.0), t.text_dim);
+        // The English columns are minimums: translated text is longer and pushes the next one right.
+        let shown = p.text(pos2(rect.min.x + 14.0, rect.center().y), Align2::LEFT_CENTER, &left, theme::font(12.0), t.text_dim);
+        let x = (rect.min.x + 120.0).max(shown.max.x + 20.0);
+        let shown = p.text(pos2(x, rect.center().y), Align2::LEFT_CENTER, crate::tl!("English (United States)"), theme::font(12.0), t.text_dim);
         // Transient status message.
         if let Some((msg, at)) = app.status.clone() {
             if crate::now_ms() - at < 6000.0 {
-                p.text(pos2(rect.min.x + 290.0, rect.center().y), Align2::LEFT_CENTER, &msg, theme::font(12.0), t.accent);
+                let x = (rect.min.x + 290.0).max(shown.max.x + 20.0);
+                p.text(pos2(x, rect.center().y), Align2::LEFT_CENTER, crate::tl!(&msg), theme::font(12.0), t.accent);
                 ui.ctx().request_repaint_after(std::time::Duration::from_millis(500));
             } else {
                 app.status = None;
@@ -93,18 +99,18 @@ fn small_icon(ui: &mut Ui, icon: Icon, tip: &str, on: bool) -> egui::Response {
         ui.painter().rect_filled(r, CornerRadius::same(4), if on { t.selected } else { t.hover });
     }
     icons::paint(ui.painter(), Rect::from_center_size(r.center(), vec2(16.0, 16.0)), icon, t.text_dim, false);
-    resp.on_hover_text(tip)
+    resp.on_hover_text(crate::tl!(tip))
 }
 
 fn labeled(ui: &mut Ui, icon: Icon, label: &str, on: bool) -> egui::Response {
     let t = Tokens::get(ui.ctx());
-    let w = 22.0 + ui.fonts_mut(|f| f.layout_no_wrap(label.into(), theme::font(12.0), t.text).size().x) + 8.0;
+    let w = 22.0 + ui.fonts_mut(|f| f.layout_no_wrap(crate::tl!(label).into(), theme::font(12.0), t.text).size().x) + 8.0;
     let (r, resp) = ui.allocate_exact_size(vec2(w, 20.0), Sense::click());
     if on || resp.hovered() {
         ui.painter().rect_filled(r, CornerRadius::same(4), if on { t.selected } else { t.hover });
     }
     icons::paint(ui.painter(), Rect::from_center_size(pos2(r.min.x + 11.0, r.center().y), vec2(15.0, 15.0)), icon, t.text_dim, false);
-    ui.painter().text(pos2(r.min.x + 22.0, r.center().y), Align2::LEFT_CENTER, label, theme::font(12.0), t.text_dim);
+    ui.painter().text(pos2(r.min.x + 22.0, r.center().y), Align2::LEFT_CENTER, crate::tl!(label), theme::font(12.0), t.text_dim);
     resp
 }
 
@@ -148,7 +154,7 @@ pub fn notes_pane(app: &mut SlideApp, ui: &mut Ui) {
             let r = ui.add(
                 egui::TextEdit::multiline(&mut buf)
                     .id(id)
-                    .hint_text("Click to add notes")
+                    .hint_text(crate::tl!("Click to add notes"))
                     .frame(egui::Frame::NONE)
                     .desired_width(f32::INFINITY)
                     .desired_rows(2)
