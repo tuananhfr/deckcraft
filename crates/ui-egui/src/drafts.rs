@@ -67,7 +67,16 @@ struct Entry {
 
 impl Entry {
     fn new(key: String, current: DocInput, now: f64) -> Self {
-        Entry { key, current, drafted: None, stored: false, last_change: now, first_unput_change: None, last_put: f64::NEG_INFINITY, serialize_ms: 0.0 }
+        Entry {
+            key,
+            current,
+            drafted: None,
+            stored: false,
+            last_change: now,
+            first_unput_change: None,
+            last_put: f64::NEG_INFINITY,
+            serialize_ms: 0.0,
+        }
     }
 
     fn changed_since_put(&self) -> bool {
@@ -137,7 +146,8 @@ impl Drafts {
     /// The page is being hidden (maybe for good): put every changed unsaved document now, as of
     /// the last frame, without waiting for the idle moment.
     pub fn flush(&mut self, clock: &dyn Fn() -> f64, store: &mut dyn DraftStore) {
-        let due: Vec<u64> = self.entries.iter().filter(|(_, e)| e.current.unsaved && !e.current.composing && e.changed_since_put()).map(|(uid, _)| *uid).collect();
+        let due: Vec<u64> =
+            self.entries.iter().filter(|(_, e)| e.current.unsaved && !e.current.composing && e.changed_since_put()).map(|(uid, _)| *uid).collect();
         let now = clock();
         for uid in due {
             self.put(uid, now, clock, store);

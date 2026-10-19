@@ -38,7 +38,10 @@ impl DraftBridge {
     /// After the app's `logic`: tell the store the app can open drafts (once, after the fonts, as
     /// for any file), and open those it handed back.
     pub fn logic(&mut self, app: &mut SlideApp, ctx: &egui::Context) {
-        if !self.ready && app.fonts_ready() && let Some(store) = JsStore::lookup() {
+        if !self.ready
+            && app.fonts_ready()
+            && let Some(store) = JsStore::lookup()
+        {
             self.ready = true;
             if let Err(e) = store.ready(self.restores.clone(), ctx.clone()) {
                 log::warn!("erpDrafts.ready failed: {e}");
@@ -143,7 +146,8 @@ impl JsStore {
 impl DraftStore for JsStore {
     fn put(&mut self, key: &str, name: &str, format: &str, bytes: &[u8]) {
         // A copy the store owns, never a view into wasm memory (which moves when it grows).
-        let args = js_sys::Array::of4(&JsValue::from_str(key), &JsValue::from_str(name), &JsValue::from_str(format), &js_sys::Uint8Array::from(bytes));
+        let args =
+            js_sys::Array::of4(&JsValue::from_str(key), &JsValue::from_str(name), &JsValue::from_str(format), &js_sys::Uint8Array::from(bytes));
         if let Err(e) = self.call("put", &args) {
             log::warn!("erpDrafts.put({key}) failed: {e}");
         }
