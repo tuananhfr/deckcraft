@@ -11,6 +11,7 @@ pub mod canvas;
 pub mod control;
 pub mod credits;
 pub mod dialogs;
+pub mod drafts;
 pub mod fillui;
 pub mod icons;
 pub mod media;
@@ -714,6 +715,11 @@ impl SlideApp {
         }
     }
 
+    /// The interface fonts are installed: files can be opened (`Services::inbox` waits for this).
+    pub fn fonts_ready(&self) -> bool {
+        self.fonts_ready
+    }
+
     /// Closing the page now would lose work: unsaved changes, or a save the host hasn't finished.
     pub fn has_unsaved_changes(&self) -> bool {
         self.session.documents().iter().any(|d| d.is_dirty()) || !self.pending_saves.is_empty()
@@ -1231,6 +1237,9 @@ pub fn now_ms() -> f64 {
 fn js_now() -> f64 {
     js_sys::Date::now()
 }
+
+#[cfg(test)]
+mod drafts_tests;
 
 #[cfg(test)]
 mod ime_tests;

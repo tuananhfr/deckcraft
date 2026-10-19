@@ -8,6 +8,8 @@ use deckcraft_engine::Session;
 use deckcraft_ui_egui::{Inbox, SaveDone, SaveOutcome, Services, SlideApp};
 use wasm_bindgen::JsCast as _;
 
+use crate::draft_bridge::DraftBridge;
+
 const PRESENTATION_EXTS: &[&str] = &["deckcraft", "pptx", "potx", "ppsx", "txt", "md"];
 const PICTURE_EXTS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp", "bmp", "tif", "tiff"];
 const AUDIO_EXTS: &[&str] = &["wav", "mp3", "m4a", "aac", "flac", "ogg", "opus", "aif", "aiff"];
@@ -57,7 +59,7 @@ pub fn start() {
                     if q.contains("show") {
                         app.start_show(0, false);
                     }
-                    Ok(Box::new(WebShell { app, inbox, dirty }))
+                    Ok(Box::new(WebShell { app, inbox, dirty, drafts: DraftBridge::new() }))
                 }),
             )
             .await;
@@ -81,6 +83,7 @@ struct WebShell {
     inbox: Inbox,
     /// Read by the `beforeunload` guard, which can't reach the app.
     dirty: Rc<Cell<bool>>,
+    drafts: DraftBridge,
 }
 
 impl eframe::App for WebShell {
@@ -101,6 +104,7 @@ impl eframe::App for WebShell {
             });
         }
         self.app.logic(ctx);
+        self.drafts.logic(&mut self.app, ctx);
     }
 
     fn raw_input_hook(&mut self, _ctx: &egui::Context, raw: &mut egui::RawInput) {
@@ -111,6 +115,7 @@ impl eframe::App for WebShell {
         self.app.ui(ui);
         // After `ui`, where typing edits the presentation, so the guard is never a frame behind.
         self.dirty.set(self.app.has_unsaved_changes());
+        self.drafts.after_frame(&self.app, ui.ctx());
     }
 }
 
