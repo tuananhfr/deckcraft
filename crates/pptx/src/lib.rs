@@ -31,6 +31,9 @@ pub enum PptxError {
     Write(String),
     #[error("malformed XML: {0}")]
     Xml(String),
+    /// Refused by the decompression limits (`deckcraft_model::inflate`).
+    #[error("{too_large} ({0})", too_large = deckcraft_model::inflate::TOO_LARGE)]
+    TooLarge(String),
 }
 
 /// Does this look like an OOXML package (zip with `[Content_Types].xml`)?

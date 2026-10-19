@@ -1,19 +1,15 @@
 //! Open Packaging Conventions: the zip container, part names, relationships and content types.
 
 use std::collections::HashMap;
-use std::io::{Cursor, Read, Write};
+use std::io::{Cursor, Write};
+
+use deckcraft_model::inflate::{InflateError, Inflater, LIMITS, Limits};
 
 use crate::PptxError;
 use crate::xml::{self, A, W};
 
-/// Largest single part we decompress (media included).
-pub const MAX_PART: u64 = 512 * 1024 * 1024;
 /// Largest XML part we parse.
 pub const MAX_XML_PART: usize = 96 * 1024 * 1024;
-/// Total decompressed bytes accepted for one package.
-pub const MAX_TOTAL: u64 = 2 * 1024 * 1024 * 1024;
-/// Maximum number of zip entries.
-pub const MAX_ENTRIES: usize = 50_000;
 
 pub const NS_A: &str = "http://schemas.openxmlformats.org/drawingml/2006/main";
 pub const NS_R: &str = "http://schemas.openxmlformats.org/officeDocument/2006/relationships";
@@ -36,14 +32,17 @@ pub struct Package {
 
 impl Package {
     pub fn open(bytes: &[u8]) -> Result<Self, PptxError> {
+        Package::open_with(bytes, LIMITS)
+    }
+
+    /// [`Package::open`] under other limits (smaller ones in tests).
+    pub fn open_with(bytes: &[u8], limits: Limits) -> Result<Self, PptxError> {
         let mut zip = zip::ZipArchive::new(Cursor::new(bytes)).map_err(|e| PptxError::NotPptx(format!("{e}")))?;
-        if zip.len() > MAX_ENTRIES {
-            return Err(PptxError::NotPptx(format!("too many entries ({})", zip.len())));
-        }
+        let mut inflater = Inflater::new(limits);
+        inflater.check_entries(zip.len()).map_err(|e| PptxError::TooLarge(e.to_string()))?;
         let mut parts = HashMap::new();
-        let mut total: u64 = 0;
         for i in 0..zip.len() {
-            let mut f = match zip.by_index(i) {
+            let f = match zip.by_index(i) {
                 Ok(f) => f,
                 Err(e) => {
                     log::warn!("pptx: skipping unreadable zip entry {i}: {e}");
@@ -54,25 +53,20 @@ impl Package {
                 continue;
             }
             let name = f.name().trim_start_matches('/').to_string();
-            let declared = f.size();
-            if declared > MAX_PART {
-                log::warn!("pptx: skipping oversized part {name} ({declared} bytes)");
-                continue;
-            }
-            let mut data = Vec::with_capacity(declared.min(16 * 1024 * 1024) as usize);
-            let cap = MAX_PART.min(MAX_TOTAL.saturating_sub(total));
-            match (&mut f).take(cap.saturating_add(1)).read_to_end(&mut data) {
-                Ok(_) if data.len() as u64 > cap => {
-                    log::warn!("pptx: part {name} exceeds size limits; skipped");
+            let (declared, compressed) = (f.size(), f.compressed_size());
+            let data = match inflater.read(&name, f, declared, compressed, u64::MAX) {
+                Ok(data) => data,
+                // Over only a caller limit: just this part goes.
+                Err(InflateError::TooBig(e)) => {
+                    log::warn!("pptx: skipping oversized part {e}");
                     continue;
                 }
-                Ok(_) => {}
-                Err(e) => {
-                    log::warn!("pptx: could not read {name}: {e}");
+                Err(InflateError::Damaged(e)) => {
+                    log::warn!("pptx: could not read {e}");
                     continue;
                 }
-            }
-            total = total.saturating_add(data.len() as u64);
+                Err(InflateError::Refused(e)) => return Err(PptxError::TooLarge(e)),
+            };
             parts.insert(name.to_ascii_lowercase(), (name, data));
         }
         Ok(Package { parts })
@@ -351,6 +345,66 @@ impl PackageOut {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const MIB: u64 = 1024 * 1024;
+
+    fn zip_of(files: &[(&str, &[u8])]) -> Vec<u8> {
+        let mut z = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        for (n, d) in files {
+            z.start_file(*n, zip::write::SimpleFileOptions::default()).unwrap();
+            z.write_all(d).unwrap();
+        }
+        z.finish().unwrap().into_inner()
+    }
+
+    /// Bytes deflate barely compresses (xorshift), so only the size caps can stop them.
+    fn noise(len: usize, mut x: u64) -> Vec<u8> {
+        (0..len)
+            .map(|_| {
+                x ^= x << 13;
+                x ^= x >> 7;
+                x ^= x << 17;
+                (x >> 24) as u8
+            })
+            .collect()
+    }
+
+    /// Rewrites the inflated size `name` declares, in its local header and the central directory.
+    fn declare_size(zip: &mut [u8], name: &str, size: u32) {
+        for i in 0..zip.len() - 4 {
+            let (name_at, size_at) = match zip[i..i + 4] {
+                [0x50, 0x4b, 0x03, 0x04] => (30, 22),
+                [0x50, 0x4b, 0x01, 0x02] => (46, 24),
+                _ => continue,
+            };
+            if zip.get(i + name_at..i + name_at + name.len()) == Some(name.as_bytes()) {
+                zip[i + size_at..i + size_at + 4].copy_from_slice(&size.to_le_bytes());
+            }
+        }
+    }
+
+    fn small(entry: u64, total: u64) -> Limits {
+        Limits { entry, total, ..LIMITS }
+    }
+
+    #[test]
+    fn a_declared_small_part_is_cut_off_while_it_inflates() {
+        let mut bytes = zip_of(&[("ppt/media/big.bin", &noise(3 * MIB as usize, 7))]);
+        declare_size(&mut bytes, "ppt/media/big.bin", 100);
+        assert!(matches!(Package::open_with(&bytes, small(MIB, 64 * MIB)), Err(PptxError::TooLarge(m)) if m.contains("inflates to more than")));
+        // Declared over the cap, the package is refused without inflating the part.
+        let bytes = zip_of(&[("ppt/media/big.bin", &noise(3 * MIB as usize, 7)), ("ppt/a.xml", b"<a/>")]);
+        assert!(matches!(Package::open_with(&bytes, small(MIB, 64 * MIB)), Err(PptxError::TooLarge(m)) if m.contains("declares")));
+    }
+
+    #[test]
+    fn the_package_total_is_capped() {
+        let honest = zip_of(&[("a.bin", &noise(2 * MIB as usize, 3)), ("b.bin", &noise(2 * MIB as usize, 5))]);
+        assert!(Package::open_with(&honest, small(4 * MIB, 5 * MIB)).is_ok());
+        let mut bytes = honest;
+        declare_size(&mut bytes, "b.bin", 100);
+        assert!(matches!(Package::open_with(&bytes, small(4 * MIB, 3 * MIB)), Err(PptxError::TooLarge(m)) if m.contains("package")));
+    }
 
     #[test]
     fn path_resolution() {

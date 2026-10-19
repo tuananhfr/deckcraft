@@ -43,6 +43,10 @@ pub enum EngineError {
     /// Opening or creating another presentation with [`MAX_DOCUMENTS`] already open.
     #[error("You can have up to {} documents open. Close one to open another.", MAX_DOCUMENTS)]
     TooManyDocuments,
+    /// A file refused by the decompression limits (`deckcraft_model::inflate`): a zip bomb, or
+    /// too large for this build. Says nothing else, so the interface can translate it as is.
+    #[error("{}", deckcraft_model::inflate::TOO_LARGE)]
+    FileTooLarge,
     #[error("{0}")]
     Other(String),
     #[error("internal error in `{0}` (the presentation was kept as it was): {1}")]

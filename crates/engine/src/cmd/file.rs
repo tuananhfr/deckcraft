@@ -67,11 +67,21 @@ fn new(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// Recognise and read presentation bytes (native, PPTX).
 pub fn open_presentation(name: &str, bytes: &[u8]) -> Result<Presentation> {
+    let too_large = |name: &str, detail: &str| {
+        log::warn!("{name}: refused by the decompression limits: {detail}");
+        EngineError::FileTooLarge
+    };
     if deckcraft_format::sniff(bytes) {
-        return deckcraft_format::load(bytes).map_err(|e| EngineError::Other(e.to_string()));
+        return deckcraft_format::load(bytes).map_err(|e| match e {
+            deckcraft_format::FormatError::TooLarge(detail) => too_large(name, &detail),
+            e => EngineError::Other(e.to_string()),
+        });
     }
     if deckcraft_pptx::sniff(bytes) {
-        let mut p = deckcraft_pptx::import(bytes).map_err(|e| EngineError::Other(e.to_string()))?;
+        let mut p = deckcraft_pptx::import(bytes).map_err(|e| match e {
+            deckcraft_pptx::PptxError::TooLarge(detail) => too_large(name, &detail),
+            e => EngineError::Other(e.to_string()),
+        })?;
         deckcraft_format::repair(&mut p);
         return Ok(p);
     }

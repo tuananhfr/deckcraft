@@ -4,9 +4,10 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
-use std::io::{Cursor, Read, Write};
+use std::io::{Cursor, Write};
 use std::sync::Arc;
 
+use deckcraft_model::inflate::{InflateError, Inflater, LIMITS, Limits};
 use deckcraft_model::text::{Paragraph, TextBody};
 use deckcraft_model::{LayoutType, Presentation, defaults};
 
@@ -16,8 +17,6 @@ pub const LEGACY_MIMETYPE: &str = concat!("application/vnd.storyteller.", "slide
 pub const EXTENSION: &str = "deckcraft";
 /// Format version written into the manifest.
 pub const VERSION: u32 = 1;
-/// Largest entry we will inflate (guards against zip bombs).
-const MAX_ENTRY: u64 = 2 << 30;
 
 #[derive(Debug, thiserror::Error)]
 pub enum FormatError {
@@ -27,6 +26,9 @@ pub enum FormatError {
     Damaged(String),
     #[error("write failed: {0}")]
     Write(String),
+    /// Refused by the decompression limits (`deckcraft_model::inflate`).
+    #[error("{too_large} ({0})", too_large = deckcraft_model::inflate::TOO_LARGE)]
+    TooLarge(String),
 }
 
 pub type Result<T> = std::result::Result<T, FormatError>;
@@ -86,29 +88,43 @@ pub fn sniff(bytes: &[u8]) -> bool {
     bytes.starts_with(b"PK") && [MIMETYPE, LEGACY_MIMETYPE].iter().any(|m| bytes.windows(m.len()).take(200).any(|w| w == m.as_bytes()))
 }
 
-fn read_entry(z: &mut zip::ZipArchive<Cursor<&[u8]>>, name: &str) -> Result<Vec<u8>> {
+/// Our own saves keep a video as one entry, so an entry may be as large as the whole package.
+fn limits() -> Limits {
+    Limits { entry: LIMITS.total, ..LIMITS }
+}
+
+fn read_entry(z: &mut zip::ZipArchive<Cursor<&[u8]>>, inflater: &mut Inflater, name: &str) -> Result<Vec<u8>> {
     let f = z.by_name(name).map_err(|e| FormatError::Damaged(format!("{name}: {e}")))?;
-    if f.size() > MAX_ENTRY {
-        return Err(FormatError::Damaged(format!("{name} is too large")));
-    }
-    let mut out = Vec::with_capacity(f.size().min(64 << 20) as usize);
-    f.take(MAX_ENTRY).read_to_end(&mut out).map_err(|e| FormatError::Damaged(format!("{name}: {e}")))?;
-    Ok(out)
+    let (declared, compressed) = (f.size(), f.compressed_size());
+    inflater.read(name, f, declared, compressed, u64::MAX).map_err(|e| match e {
+        InflateError::Refused(e) => FormatError::TooLarge(e),
+        e => FormatError::Damaged(e.to_string()),
+    })
 }
 
 /// Read a presentation.
 pub fn load(bytes: &[u8]) -> Result<Presentation> {
     let mut z = zip::ZipArchive::new(Cursor::new(bytes)).map_err(|e| FormatError::NotOurs(e.to_string()))?;
-    let json = read_entry(&mut z, "presentation.json").map_err(|_| FormatError::NotOurs("no presentation.json".into()))?;
+    let mut inflater = Inflater::new(limits());
+    inflater.check_entries(z.len()).map_err(|e| FormatError::TooLarge(e.to_string()))?;
+    let json = match read_entry(&mut z, &mut inflater, "presentation.json") {
+        Ok(json) => json,
+        Err(e @ FormatError::TooLarge(_)) => return Err(e),
+        Err(_) => return Err(FormatError::NotOurs("no presentation.json".into())),
+    };
     let m: Manifest = serde_json::from_slice(&json).map_err(|e| FormatError::Damaged(e.to_string()))?;
     if m.format != "deckcraft" {
         return Err(FormatError::NotOurs(m.format));
     }
     let mut p = m.presentation;
     for item in &mut p.media {
-        if let Ok(data) = read_entry(&mut z, &format!("media/{}", item.id.0)) {
+        if let Ok(data) = read_entry(&mut z, &mut inflater, &format!("media/{}", item.id.0)) {
             item.data = Arc::new(data);
         }
+    }
+    // A missing medium is skipped, but one over the limits refuses the whole file.
+    if let Some(InflateError::Refused(e)) = inflater.refusal() {
+        return Err(FormatError::TooLarge(e));
     }
     repair(&mut p);
     Ok(p)
@@ -228,6 +244,20 @@ mod tests {
         assert_eq!(q.slides.len(), p.slides.len());
         assert_eq!(q.media(id).map(|m| m.data.as_slice()), Some(&[1u8, 2, 3, 4][..]));
         assert_eq!(serde_json::to_value(&q.slides).unwrap(), serde_json::to_value(&p.slides).unwrap());
+    }
+
+    #[test]
+    fn a_media_bomb_refuses_the_whole_file() {
+        let mut p = Presentation::default();
+        p.add_media("a.bmp", "image/bmp", vec![0; 64 << 20]);
+        let bytes = save(&p).unwrap();
+        assert!(bytes.len() < 1 << 20, "deflated: {}", bytes.len());
+        assert!(matches!(load(&bytes), Err(FormatError::TooLarge(m)) if m.contains("200:1")));
+        // A medium that inflates normally still loads.
+        let mut p = Presentation::default();
+        let noise: Vec<u8> = (0..6u32 << 20).map(|i| (i.wrapping_mul(2_654_435_761) >> 13) as u8).collect();
+        let id = p.add_media("b.bmp", "image/bmp", noise.clone());
+        assert_eq!(load(&save(&p).unwrap()).unwrap().media(id).map(|m| m.data.len()), Some(noise.len()));
     }
 
     #[test]

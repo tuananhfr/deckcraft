@@ -217,7 +217,7 @@ fn fuzz_mutations() {
 
 #[test]
 fn zip_bomb_entry_is_capped() {
-    // A highly compressible 64 MiB XML part: must import (or fail) without blowing up.
+    // A highly compressible 64 MiB XML part: refused by the compression ratio as it inflates.
     let big = vec![b' '; 64 * 1024 * 1024];
     let mut es = entries(&valid());
     es.push(("ppt/big.xml".into(), big));
@@ -229,8 +229,7 @@ fn zip_bomb_entry_is_capped() {
     }
     let bytes = z.finish().expect("finish").into_inner();
     assert!(bytes.len() < 2 * 1024 * 1024);
-    let p = deckcraft_pptx::import(&bytes).expect("import");
-    assert_eq!(p.slides.len(), 1);
+    assert!(matches!(deckcraft_pptx::import(&bytes), Err(deckcraft_pptx::PptxError::TooLarge(_))));
 }
 
 #[test]

@@ -338,10 +338,10 @@ impl SlideApp {
         self.status = Some((msg.into(), now_ms()));
     }
 
-    /// A presentation refused for the open-documents limit is also said in a toast: the File
-    /// tab, where New and Open are, hides the status bar.
+    /// A presentation refused for the open-documents limit or the decompression limits is also
+    /// said in a toast: the File tab, where New and Open are, hides the status bar.
     pub(crate) fn note_refusal(&mut self, e: &deckcraft_engine::EngineError) {
-        if matches!(e, deckcraft_engine::EngineError::TooManyDocuments) {
+        if matches!(e, deckcraft_engine::EngineError::TooManyDocuments | deckcraft_engine::EngineError::FileTooLarge) {
             self.toast = Some(toast::Toast { text: e.to_string(), at: now_ms() });
         }
     }
@@ -1329,6 +1329,9 @@ mod drafts_tests;
 
 #[cfg(test)]
 mod ime_tests;
+
+#[cfg(test)]
+mod open_refused_tests;
 
 #[cfg(test)]
 mod tests {
