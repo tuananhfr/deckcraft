@@ -11,6 +11,8 @@ pub mod canvas;
 pub mod control;
 pub mod credits;
 pub mod dialogs;
+pub mod doctabs;
+pub mod docview;
 pub mod drafts;
 pub mod fillui;
 pub mod find;
@@ -269,6 +271,8 @@ pub struct SlideApp {
     /// How those saves ended, as the host reports it (from an async task on the web).
     save_results: std::rc::Rc<std::cell::RefCell<Vec<(u64, SaveOutcome)>>>,
     next_save: u64,
+    /// Each open presentation's zoom while another one is shown.
+    doc_views: docview::DocViews,
 }
 
 /// A save the host hasn't finished: the presentation as it was written, by document uid.
@@ -321,6 +325,7 @@ impl SlideApp {
             pending_saves: vec![],
             save_results: Default::default(),
             next_save: 0,
+            doc_views: Default::default(),
         }
     }
 
@@ -333,13 +338,26 @@ impl SlideApp {
         self.status = Some((msg.into(), now_ms()));
     }
 
+    /// A presentation refused for the open-documents limit is also said in a toast: the File
+    /// tab, where New and Open are, hides the status bar.
+    pub(crate) fn note_refusal(&mut self, e: &deckcraft_engine::EngineError) {
+        if matches!(e, deckcraft_engine::EngineError::TooManyDocuments) {
+            self.toast = Some(toast::Toast { text: e.to_string(), at: now_ms() });
+        }
+    }
+
     /// Run a command by id (UI commands here, everything else in the engine). Errors show in the
     /// status bar and are returned.
     pub fn run(&mut self, id: &str, params: Value) -> Result<Value, String> {
+        // Zoom commands act on the presentation shown, even one switched to since the last frame.
+        self.sync_doc_view();
         let r = if UI_COMMANDS.iter().any(|c| c.0 == id) {
             self.run_ui(id, &params)
         } else {
-            self.session.execute(id, &params).map_err(|e| e.to_string())
+            self.session.execute(id, &params).map_err(|e| {
+                self.note_refusal(&e);
+                e.to_string()
+            })
         };
         if let Err(e) = &r {
             self.set_status(e.clone());
@@ -390,12 +408,31 @@ impl SlideApp {
     /// File › Close and Ctrl+W: closes the active presentation, asking first when it has unsaved
     /// changes (Save, Don't Save, Cancel), as PowerPoint does.
     pub fn close_presentation(&mut self) {
-        match self.session.active() {
-            None => {}
-            Some(d) if d.is_dirty() => self.dialog = Some(dialogs::Dialog::new("close")),
-            Some(_) => {
-                let _ = self.run("file.close", json!({}));
-            }
+        if let Some(uid) = self.session.active().map(|d| d.uid) {
+            self.close_document_by_uid(uid);
+        }
+    }
+
+    /// Closes the presentation with `uid` (Close, or its document tab), asking first when it has
+    /// unsaved changes. Closing another presentation keeps the active one active.
+    pub fn close_document_by_uid(&mut self, uid: u64) {
+        let Some((i, d)) = self.session.documents().iter().enumerate().find(|(_, d)| d.uid == uid) else { return };
+        if d.is_dirty() {
+            let mut d = dialogs::Dialog::new("close");
+            d.params = json!({"uid": uid});
+            self.dialog = Some(d);
+        } else {
+            let _ = self.run("file.close", json!({"index": i}));
+        }
+    }
+
+    /// Save for presentation `i`, which need not be the active one (that one stays active).
+    pub fn save_document(&mut self, i: usize) {
+        let active = self.session.active().map(|d| d.uid);
+        self.session.set_active(i);
+        self.save();
+        if let Some(a) = active.and_then(|uid| self.session.documents().iter().position(|d| d.uid == uid)) {
+            self.session.set_active(a);
         }
     }
 
@@ -639,7 +676,10 @@ impl SlideApp {
     }
 
     pub fn open_path(&mut self, path: &str) -> Result<(), String> {
-        self.session.execute("file.open", &json!({"path": path})).map_err(|e| e.to_string())?;
+        self.session.execute("file.open", &json!({"path": path})).map_err(|e| {
+            self.note_refusal(&e);
+            e.to_string()
+        })?;
         self.ui.recent.retain(|p| p != path);
         self.ui.recent.insert(0, path.to_string());
         self.ui.recent.truncate(12);
@@ -855,6 +895,7 @@ impl SlideApp {
             let _ = self.session.execute("file.new", &json!({}));
         }
         if let Err(e) = self.session.execute(cmd, &p) {
+            self.note_refusal(&e);
             self.set_status(e.to_string());
         }
     }
@@ -1012,6 +1053,7 @@ impl SlideApp {
                         && matches!(key, egui::Key::N)
                         && let Err(e) = self.session.key(key_name(key), mods)
                     {
+                        self.note_refusal(&e);
                         self.set_status(e.to_string());
                     }
                 }
@@ -1062,9 +1104,9 @@ impl SlideApp {
                         continue;
                     }
                     let name = key_name(key);
-                    match self.session.key(name, mods) {
-                        Ok(_) => {}
-                        Err(e) => self.set_status(e.to_string()),
+                    if let Err(e) = self.session.key(name, mods) {
+                        self.note_refusal(&e);
+                        self.set_status(e.to_string());
                     }
                 }
                 _ => {}
@@ -1092,8 +1134,10 @@ impl SlideApp {
         self.sync_backstage();
         self.keyboard(&ctx);
         self.sync_backstage();
+        self.sync_doc_view();
         ribbon::title_bar(self, ui);
         if self.backstage.is_none() && self.session.active().is_some() {
+            doctabs::show(self, ui);
             ribbon::show(self, ui);
             status::status_bar(self, ui);
         }
@@ -1276,6 +1320,9 @@ pub fn now_ms() -> f64 {
 fn js_now() -> f64 {
     js_sys::Date::now()
 }
+
+#[cfg(test)]
+mod doctabs_tests;
 
 #[cfg(test)]
 mod drafts_tests;

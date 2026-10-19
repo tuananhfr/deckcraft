@@ -92,10 +92,12 @@ pub fn list(dir: &Path) -> Vec<(u64, Value)> {
 }
 
 /// Reopen every entry as an unsaved presentation and remove the entries (this session writes its
-/// own). Unreadable entries are left in place. Returns the opened documents' indices.
+/// own). Unreadable entries are left in place, and so are those past [`crate::MAX_DOCUMENTS`]
+/// (the error says so; the ones opened stay open). Returns the opened documents' indices.
 pub fn open(s: &mut Session, dir: &Path) -> Result<Vec<usize>> {
     let mut opened = Vec::new();
     for (uid, meta) in list(dir) {
+        s.ensure_room()?;
         let (doc, _) = files(dir, uid);
         let Ok(bytes) = std::fs::read(&doc) else { continue };
         let Ok(mut d) = deckcraft_format::load(&bytes) else { continue };
@@ -106,7 +108,7 @@ pub fn open(s: &mut Session, dir: &Path) -> Result<Vec<usize>> {
         // Unsaved: the copy on disk (if any) is older than what was recovered.
         st.saved_doc = std::sync::Arc::new((*st.doc).clone());
         st.revision += 1;
-        opened.push(s.add_document(st));
+        opened.push(s.add_document(st)?);
         discard(dir, uid);
     }
     Ok(opened)

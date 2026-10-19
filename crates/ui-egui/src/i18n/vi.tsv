@@ -249,6 +249,7 @@
 	Close	Đóng
 	Close\nMaster View	Đóng\nDạng xem Cái
 	Close Master View	Đóng Dạng xem Cái
+	Close {name}	Đóng {name}
 	Cloud	Đám mây
 	Clustered Bar	Thanh Nhóm
 	Clustered Column	Cột Nhóm
@@ -1389,6 +1390,7 @@
 	Words	Từ
 	Wrap Text in Shape	Ngắt Dòng Văn bản trong Hình
 	Wrap text in shape	Ngắt dòng văn bản trong hình
+	You can have up to 10 documents open. Close one to open another.	Chỉ mở được tối đa 10 tài liệu. Hãy đóng bớt một tài liệu để mở tài liệu khác.
 	Your changes will be lost if you don't save them.	Nếu không lưu, các thay đổi của bạn sẽ bị mất.
 	Your name (comments):	Tên của bạn (chú thích):
 	Zoom	Thu phóng

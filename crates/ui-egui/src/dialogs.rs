@@ -306,8 +306,12 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
             done
         }
         "close" => {
-            // File › Close and Ctrl+W on a presentation with unsaved changes.
-            let Some(name) = app.session.active().map(|d| d.title()) else { return true };
+            // File › Close, Ctrl+W or a document tab's × on a presentation with unsaved changes.
+            let target = match d.params.get("uid").and_then(Value::as_u64) {
+                Some(uid) => app.session.documents().iter().position(|x| x.uid == uid),
+                None => app.session.active_index(),
+            };
+            let Some((i, name, uid)) = target.and_then(|i| app.session.documents().get(i).map(|x| (i, x.title(), x.uid))) else { return true };
             ui.label(
                 egui::RichText::new(crate::i18n::fmt(
                     crate::tl!("Do you want to save the changes you made to {what}?"),
@@ -321,7 +325,7 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
             ui.horizontal(|ui| {
                 let t = Tokens::get(ui.ctx());
                 if ui.add(egui::Button::new(crate::tl!("Don't Save")).min_size(vec2(84.0, 24.0))).clicked() {
-                    run(app, "file.close", json!({}));
+                    run(app, "file.close", json!({"index": i}));
                     done = true;
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -329,9 +333,9 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
                         egui::Button::new(egui::RichText::new(crate::tl!("Save")).color(t.accent_text)).fill(t.accent).min_size(vec2(72.0, 24.0)),
                     );
                     if save.clicked() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                        app.save();
-                        if app.session.active().is_some_and(|d| !d.is_dirty()) {
-                            run(app, "file.close", json!({}));
+                        app.save_document(i);
+                        if app.session.documents().get(i).is_some_and(|d| d.uid == uid && !d.is_dirty()) {
+                            run(app, "file.close", json!({"index": i}));
                         }
                         done = true;
                     }

@@ -26,7 +26,7 @@ pub fn specs() -> Vec<CommandSpec> {
             info
         ),
         cmd!(query "file.render", "Render Slide", [], None, "{slide?: index, scale?, edit?: bool} → {png: base64, width, height}", has_doc, render),
-        cmd!(noundo "file.close", "Close", ["File"], Some("Cmd+W"), "{}", has_doc, close),
+        cmd!(noundo "file.close", "Close", ["File"], Some("Cmd+W"), "{index?: document, else the active one}", has_doc, close),
         cmd!(
             "file.properties",
             "Properties",
@@ -57,9 +57,11 @@ fn new(s: &mut Session, p: &Value) -> Result<Value> {
         .and_then(|a| Some(deckcraft_geom::Size::new(a.first()?.as_f64()?, a.get(1)?.as_f64()?)))
         .filter(|s| s.width >= 1.0 && s.height >= 1.0 && s.width < 5000.0 && s.height < 5000.0)
         .unwrap_or(defaults::WIDE);
+    // Before the title, so a refused presentation doesn't use up a "PresentationN".
+    s.ensure_room()?;
     let doc = defaults::blank_presentation(size, theme, !bool_or(p, "blank", false));
     let title = s.next_untitled();
-    let i = s.add_document(DocState::new(doc, None, title));
+    let i = s.add_document(DocState::new(doc, None, title))?;
     Ok(json!({"document": i}))
 }
 
@@ -86,7 +88,7 @@ pub fn open_presentation(name: &str, bytes: &[u8]) -> Result<Presentation> {
     Err(EngineError::Other(format!("{name}: not a presentation DeckCraft can read")))
 }
 
-pub fn add_opened(s: &mut Session, name: &str, path: Option<String>, p: Presentation) -> usize {
+pub fn add_opened(s: &mut Session, name: &str, path: Option<String>, p: Presentation) -> Result<usize> {
     let title = std::path::Path::new(name).file_stem().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| name.to_string());
     let missing_fonts = crate::fonts::missing_fonts(&p);
     let mut st = DocState::new(p, path, title);
@@ -97,10 +99,11 @@ pub fn add_opened(s: &mut Session, name: &str, path: Option<String>, p: Presenta
 #[cfg(not(target_arch = "wasm32"))]
 fn open(s: &mut Session, p: &Value) -> Result<Value> {
     let path = str_param(p, "path").ok_or_else(|| bad("file.open", "missing `path`"))?;
+    s.ensure_room()?;
     let bytes = std::fs::read(path).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
     let doc = open_presentation(path, &bytes)?;
     let native = deckcraft_format::sniff(&bytes) || deckcraft_pptx::sniff(&bytes);
-    let i = add_opened(s, path, native.then(|| path.to_string()), doc);
+    let i = add_opened(s, path, native.then(|| path.to_string()), doc)?;
     let st = s.doc()?;
     Ok(json!({"document": i, "slides": st.doc.slides.len(), "missingFonts": st.missing_fonts}))
 }
@@ -112,8 +115,9 @@ fn open(_s: &mut Session, _p: &Value) -> Result<Value> {
 fn open_bytes(s: &mut Session, p: &Value) -> Result<Value> {
     let name = str_param(p, "name").unwrap_or("Presentation");
     let data = str_param(p, "data").and_then(base64_decode).ok_or_else(|| bad("file.openBytes", "missing or invalid base64 `data`"))?;
+    s.ensure_room()?;
     let doc = open_presentation(name, &data)?;
-    let i = add_opened(s, name, None, doc);
+    let i = add_opened(s, name, None, doc)?;
     Ok(json!({"document": i, "missingFonts": s.doc()?.missing_fonts}))
 }
 
@@ -339,8 +343,13 @@ fn info(s: &mut Session, _p: &Value) -> Result<Value> {
     }))
 }
 
-fn close(s: &mut Session, _p: &Value) -> Result<Value> {
-    if let Some(i) = s.active_index() {
+fn close(s: &mut Session, p: &Value) -> Result<Value> {
+    let i = match usize_param(p, "index") {
+        Some(i) if i >= s.documents().len() => return Err(bad("file.close", "no document at `index`")),
+        Some(i) => Some(i),
+        None => s.active_index(),
+    };
+    if let Some(i) = i {
         s.close_document(i);
     }
     ok()

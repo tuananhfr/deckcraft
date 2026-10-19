@@ -204,8 +204,13 @@ impl SlideApp {
     /// Open draft bytes alongside the open presentations, unsaved (they were never saved to a
     /// file), with no path and the title of `name`. Returns the document's uid.
     pub fn open_draft(&mut self, name: &str, bytes: &[u8]) -> Result<u64, String> {
+        let refused = |app: &mut SlideApp, e: deckcraft_engine::EngineError| {
+            app.note_refusal(&e);
+            e.to_string()
+        };
+        self.session.ensure_room().map_err(|e| refused(self, e))?;
         let p = deckcraft_engine::cmd::file::open_presentation(name, bytes).map_err(|e| e.to_string())?;
-        deckcraft_engine::cmd::file::add_opened(&mut self.session, name, None, p);
+        deckcraft_engine::cmd::file::add_opened(&mut self.session, name, None, p).map_err(|e| refused(self, e))?;
         let d = self.session.active_mut().ok_or("no document")?;
         d.saved_doc = Arc::new((*d.doc).clone());
         d.revision += 1;

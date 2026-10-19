@@ -68,7 +68,7 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
     }
     let (content_rect, scale) = layout(app, avail);
     // Scroll when zoomed beyond the window.
-    let scroll_id = ui.id().with("canvas_scroll");
+    let scroll_id = ui.id().with(("canvas_scroll", app.session.active().map(|d| d.uid)));
     let mut offset: egui::Vec2 = ui.data_mut(|d| d.get_temp(scroll_id).unwrap_or_default());
     let overflow = vec2((content_rect.width() + 56.0 - avail.width()).max(0.0), (content_rect.height() + 56.0 - avail.height()).max(0.0));
     let resp = ui.allocate_rect(avail, Sense::click_and_drag());

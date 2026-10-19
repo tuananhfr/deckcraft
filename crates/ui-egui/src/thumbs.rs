@@ -22,7 +22,8 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
                 master_list(app, ui);
                 return;
             }
-            egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+            let uid = app.session.active().map(|d| d.uid);
+            egui::ScrollArea::vertical().id_salt(("thumbs", uid)).auto_shrink([false, false]).show(ui, |ui| {
                 ui.add_space(8.0);
                 list(app, ui);
                 ui.add_space(20.0);

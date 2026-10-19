@@ -40,6 +40,9 @@ pub enum EngineError {
     BadParams { cmd: String, msg: String },
     #[error("no active presentation")]
     NoDocument,
+    /// Opening or creating another presentation with [`MAX_DOCUMENTS`] already open.
+    #[error("You can have up to {} documents open. Close one to open another.", MAX_DOCUMENTS)]
+    TooManyDocuments,
     #[error("{0}")]
     Other(String),
     #[error("internal error in `{0}` (the presentation was kept as it was): {1}")]
@@ -53,6 +56,10 @@ impl From<deckcraft_model::ModelError> for EngineError {
 }
 
 pub type Result<T> = std::result::Result<T, EngineError>;
+
+/// Most presentations open at once: each one keeps its whole deck and undo history in memory,
+/// which a browser tab can't grow without bound.
+pub const MAX_DOCUMENTS: usize = 10;
 
 /// Text being edited in place: a shape's body (or a table cell, or the slide's notes).
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -413,18 +420,31 @@ impl Session {
             self.active = Some(i);
         }
     }
-    pub fn add_document(&mut self, d: DocState) -> usize {
-        self.docs.push(d);
-        self.active = Some(self.docs.len() - 1);
-        self.docs.len() - 1
+    /// Another presentation can be opened ([`MAX_DOCUMENTS`]).
+    pub fn ensure_room(&self) -> Result<()> {
+        if self.docs.len() < MAX_DOCUMENTS { Ok(()) } else { Err(EngineError::TooManyDocuments) }
     }
+    /// Every open and new presentation comes through here, so this is where the limit holds.
+    pub fn add_document(&mut self, d: DocState) -> Result<usize> {
+        self.ensure_room()?;
+        self.docs.push(d);
+        let i = self.docs.len() - 1;
+        self.active = Some(i);
+        Ok(i)
+    }
+    /// Closing another presentation keeps the active one active.
     pub fn close_document(&mut self, i: usize) {
         if i < self.docs.len() {
             let d = self.docs.remove(i);
             if let Some(dir) = &self.recovery_dir {
                 recovery::discard(dir, d.uid);
             }
-            self.active = if self.docs.is_empty() { None } else { Some(i.min(self.docs.len() - 1)) };
+            self.active = match self.active {
+                _ if self.docs.is_empty() => None,
+                Some(a) if a > i => Some(a - 1),
+                Some(a) if a < i => Some(a),
+                _ => Some(i.min(self.docs.len() - 1)),
+            };
         }
     }
     pub fn next_untitled(&mut self) -> String {
@@ -556,5 +576,7 @@ pub(crate) fn push_undo(st: &mut DocState, e: HistoryEntry) {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_documents;
 #[cfg(test)]
 mod tests_keys;

@@ -14,7 +14,7 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
     let cur = st.selection.slide;
     let multi = st.selection.slides.clone();
     let zoom = app.ui.sorter_zoom.clamp(0.5, 3.0);
-    egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+    egui::ScrollArea::vertical().id_salt(("sorter", st.uid)).auto_shrink([false, false]).show(ui, |ui| {
         ui.add_space(16.0);
         let tw = 200.0 * zoom;
         let th = tw * (doc.slide_size.height / doc.slide_size.width.max(1.0)) as f32;
