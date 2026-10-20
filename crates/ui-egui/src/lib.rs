@@ -8,6 +8,7 @@
 
 pub mod backstage;
 pub mod canvas;
+mod clipboard_keys;
 pub mod close_many;
 pub mod control;
 pub mod credits;
@@ -1089,6 +1090,7 @@ impl SlideApp {
 
     /// Inject synthetic events (one pointer event per frame).
     pub fn raw_input_hook(&mut self, raw: &mut egui::RawInput) {
+        clipboard_keys::drop_duplicate_clipboard_keys(&mut raw.events, cfg!(target_arch = "wasm32"));
         if self.synthetic.is_empty() {
             return;
         }
@@ -1133,6 +1135,7 @@ impl SlideApp {
             self.drain_requests();
             return;
         }
+        let ignore_paste = clipboard_keys::ignore_paste_for_shift_v(&events, cfg!(target_arch = "wasm32"));
         for e in events {
             match e {
                 egui::Event::Text(t) => {
@@ -1158,6 +1161,9 @@ impl SlideApp {
                     }
                 }
                 egui::Event::Paste(text) => {
+                    if ignore_paste {
+                        continue;
+                    }
                     // An image on the clipboard (screenshots, copied pictures) becomes a picture.
                     let img = if text.is_empty() { self.services.clipboard_image.as_mut().and_then(|f| f()) } else { None };
                     let r = match img {
@@ -1395,6 +1401,9 @@ pub fn now_ms() -> f64 {
 fn js_now() -> f64 {
     js_sys::Date::now()
 }
+
+#[cfg(test)]
+mod clipboard_keys_tests;
 
 #[cfg(test)]
 mod doctabs_tests;
