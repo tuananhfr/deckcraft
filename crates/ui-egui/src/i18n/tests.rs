@@ -12,6 +12,24 @@ fn bundled_catalogs_parse_without_errors() {
 }
 
 #[test]
+fn vietnamese_product_name_is_localized_except_the_original_copyright() {
+    let (entries, errors) = parse_entries(include_str!("vi.tsv"));
+    assert!(errors.is_empty(), "{errors:#?}");
+    // Copyright names the original contributors rather than the localized product.
+    let credit = "© 2026 ArtCraft Team and the DeckCraft contributors";
+    for entry in entries {
+        if entry.source == credit {
+            assert_eq!(entry.translation, "© 2026 nhóm ArtCraft và những người đóng góp cho DeckCraft");
+        } else {
+            assert!(!entry.translation.contains("DeckCraft"), "unlocalized product name: {}", entry.source);
+        }
+    }
+    let vi = Lang::from_code("vi").unwrap();
+    assert_eq!(tr(vi, "About DeckCraft"), "Giới thiệu Trình chiếu");
+    assert_eq!(tr(vi, "DeckCraft can't export “{format}”"), "Trình chiếu không xuất được “{format}”");
+}
+
+#[test]
 fn vietnamese_is_registered_and_english_is_the_fallback() {
     let vi = Lang::from_code("VI").expect("vi registered");
     assert_eq!(vi.name(), "Tiếng Việt");

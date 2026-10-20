@@ -231,14 +231,8 @@ impl Session {
             // The text an input method just took back is replaced in the same undo step.
             return self.commit_text(text);
         }
-        if st.selection.text.is_none() {
-            let Some(id) = st.selection.shapes.first().copied() else { return Ok(json!({"handled": false})) };
-            if st.selection.shapes.len() != 1 {
-                return Ok(json!({"handled": false}));
-            }
-            // Typing on a selected shape replaces its text (PowerPoint behaviour).
-            self.execute("text.edit", &json!({"id": id}))?;
-            self.execute("text.selectAll", &json!({}))?;
+        if !self.start_typing(text)? {
+            return Ok(json!({"handled": false}));
         }
         self.execute("text.insert", &json!({"text": text}))
     }
@@ -284,6 +278,14 @@ impl Session {
         }
         let Some(id) = st.selection.shapes.first().copied() else { return Ok(false) };
         if st.selection.shapes.len() != 1 || text.is_empty() {
+            return Ok(false);
+        }
+        let accepts_text = st.shape(id).is_some_and(|shape| match &shape.kind {
+            deckcraft_model::ShapeKind::Shape | deckcraft_model::ShapeKind::Connector { .. } => true,
+            deckcraft_model::ShapeKind::Table(table) => table.cell(0, 0).is_some(),
+            _ => false,
+        });
+        if !accepts_text {
             return Ok(false);
         }
         self.execute("text.edit", &json!({"id": id}))?;
@@ -379,6 +381,52 @@ mod tests {
         s.key("Right", Mods::default()).unwrap();
         s.key("Delete", Mods::default()).unwrap();
         assert_eq!(s.doc().unwrap().current_slide().unwrap().shapes.len(), 1);
+    }
+
+    #[test]
+    fn typing_and_ime_on_a_selected_picture_are_ignored() {
+        use deckcraft_model::{ShapeKind, style::PictureFill};
+        let mut s = Session::with_new();
+        s.execute("shape.insert", &json!({"preset": "rect"})).unwrap();
+        let id = s.doc().unwrap().selection.shapes[0];
+        s.edit(|doc, sel| {
+            let media = doc.add_media("pixel.png", "image/png", vec![1, 2, 3]);
+            let shape = deckcraft_model::find_shape_mut(crate::shapes_mut(doc, sel).unwrap(), id).unwrap();
+            shape.text = None;
+            shape.kind = ShapeKind::Picture { fill: PictureFill { media, ..Default::default() } };
+            Ok(())
+        })
+        .unwrap();
+        let before = s.doc().unwrap().doc.clone();
+        let undo = s.doc().unwrap().history.undo.len();
+        assert_eq!(s.type_text("a").unwrap()["handled"], false);
+        assert_eq!(s.compose_text("a", None).unwrap()["handled"], false);
+        assert_eq!(s.commit_text("a").unwrap()["handled"], false);
+        let state = s.doc().unwrap();
+        assert!(std::sync::Arc::ptr_eq(&before, &state.doc));
+        assert_eq!(state.history.undo.len(), undo);
+        assert_eq!(state.selection.shapes, vec![id]);
+        assert!(state.selection.text.is_none());
+        assert!(state.composition.is_none());
+        assert!(state.shape(id).unwrap().text.is_none());
+    }
+
+    #[test]
+    fn ime_on_a_selected_table_edits_the_first_cell() {
+        use deckcraft_model::{ShapeId, ShapeKind};
+        let mut s = Session::with_new();
+        s.prefs.autocorrect = false;
+        let id = s.execute("insert.table", &json!({"rows": 2, "cols": 2})).unwrap()["id"].clone();
+        s.execute("text.set", &json!({"id": id, "cell": [0, 0], "text": "old"})).unwrap();
+        s.execute("edit.select", &json!({"ids": [id]})).unwrap();
+        s.compose_text("a", None).unwrap();
+        s.commit_text("á").unwrap();
+        let state = s.doc().unwrap();
+        assert_eq!(state.selection.text.as_ref().and_then(|t| t.cell), Some((0, 0)));
+        let shape = state.shape(ShapeId(id.as_u64().unwrap() as u32)).unwrap();
+        let ShapeKind::Table(table) = &shape.kind else { panic!("expected table") };
+        assert_eq!(table.cell(0, 0).unwrap().text.text(), "á");
+        assert_eq!(table.cell(0, 1).unwrap().text.text(), "");
     }
 
     #[test]

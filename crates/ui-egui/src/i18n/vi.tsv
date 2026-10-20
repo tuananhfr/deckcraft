@@ -39,7 +39,7 @@
 	A3 Paper (297x420 mm)	Giấy A3 (297x420 mm)
 	A4 Paper (210x297 mm)	Giấy A4 (210x297 mm)
 	About	Giới thiệu
-	About DeckCraft	Giới thiệu DeckCraft
+	About DeckCraft	Giới thiệu Trình chiếu
 	Accessibility	Trợ năng
 	Accessibility Checker	Bộ kiểm tra Trợ năng
 	Account	Tài khoản
@@ -362,12 +362,12 @@
 	Date and time	Ngày và giờ
 	Decagon	Hình mười cạnh
 	Decision	Quyết định
-	DeckCraft can't export “{format}”	DeckCraft không xuất được “{format}”
-	DeckCraft has no accounts: there is nothing to sign in to, and your presentations stay on your device.	DeckCraft không dùng tài khoản: bạn không cần đăng nhập, và bản trình bày luôn nằm trên thiết bị của bạn.
-	DeckCraft Presentation (*.deckcraft)	Bản trình bày DeckCraft (*.deckcraft)
-	DeckCraft prints through a PDF: it downloads, ready to print from your browser or PDF viewer.	DeckCraft in qua tệp PDF: tệp được tải xuống, sẵn sàng để in từ trình duyệt hoặc trình xem PDF của bạn.
-	DeckCraft prints through a PDF: it opens in your PDF viewer, where you choose the printer.	DeckCraft in qua tệp PDF: tệp sẽ mở trong trình xem PDF, tại đó bạn chọn máy in.
-	DeckCraft's own format: everything is kept	Định dạng riêng của DeckCraft: giữ lại mọi thứ
+	DeckCraft can't export “{format}”	Trình chiếu không xuất được “{format}”
+	DeckCraft has no accounts: there is nothing to sign in to, and your presentations stay on your device.	Trình chiếu không dùng tài khoản: bạn không cần đăng nhập, và bản trình bày luôn nằm trên thiết bị của bạn.
+	DeckCraft Presentation (*.deckcraft)	Bản trình bày Trình chiếu (*.deckcraft)
+	DeckCraft prints through a PDF: it downloads, ready to print from your browser or PDF viewer.	Trình chiếu in qua tệp PDF: tệp được tải xuống, sẵn sàng để in từ trình duyệt hoặc trình xem PDF của bạn.
+	DeckCraft prints through a PDF: it opens in your PDF viewer, where you choose the printer.	Trình chiếu in qua tệp PDF: tệp sẽ mở trong trình xem PDF, tại đó bạn chọn máy in.
+	DeckCraft's own format: everything is kept	Định dạng riêng của Trình chiếu: giữ lại mọi thứ
 	Decrease Font Size	Giảm Cỡ Phông
 	Decrease List Level	Giảm Mức Danh sách
 	Delay:	Trễ:
@@ -982,7 +982,7 @@
 	Presented by a speaker (full screen)	Do diễn giả trình bày (toàn màn hình)
 	Presenter\nView	Dạng xem\nDiễn giả
 	Presenter View	Dạng xem Diễn giả
-	Presenter View — DeckCraft	Dạng xem Diễn giả — DeckCraft
+	Presenter View — DeckCraft	Dạng xem Diễn giả — Trình chiếu
 	Preset gradients	Chuyển màu đặt sẵn
 	Prestige	Uy nghi
 	Preview	Xem trước
@@ -1441,7 +1441,7 @@
 	{names} isn't installed on this computer. Text that uses it is shown in a similar font.	{names} chưa được cài trên máy tính này. Văn bản dùng phông này được hiển thị bằng một phông tương tự.
 	{name} ({n} slides)	{name} ({n} trang chiếu)
 	{name} Slide Master	Trang chiếu Cái {name}
-	{name}: DeckCraft can't open this kind of file	{name}: DeckCraft không mở được loại tệp này
+	{name}: DeckCraft can't open this kind of file	{name}: Trình chiếu không mở được loại tệp này
 	{n} bytes	{n} byte
 	{n} Column	{n} Cột
 	{n} Columns	{n} Cột

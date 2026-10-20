@@ -1,5 +1,9 @@
 # ERPCons changes
 
+- Selected-object typing (both): keep table typing in the first selected cell (or the first cell of the whole table), including IME input; ignore typing and IME on pictures and other objects without text instead of showing raw command errors.
+- Light-theme inputs (both): use existing palette tokens for visible input, checkbox and combo-box borders and checkmarks, with at least 3:1 contrast against panels and fields; dark-theme visuals are unchanged.
+- Vietnamese product name (both): translate the product name as "Trình chiếu" throughout the Vietnamese catalog, preserving the original copyright credit; add a catalog regression check.
+
 - Legacy presentation notices (both): OLE2/.ppt and .odp open a translated conversion dialog instead of a status message; .pptm opens with a macro-loss notice, and Save/Save As propose .pptx and preserve the legacy original.
 - Font substitution notice verification (both): regression coverage checks the existing dismissible toast appears once per opened presentation, including tab switches, and lists at most three font names followed by the remaining count.
 

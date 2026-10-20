@@ -139,6 +139,14 @@ pub fn apply(ctx: &egui::Context, t: &Tokens) {
     v.widgets.active.weak_bg_fill = t.pressed;
     v.widgets.active.bg_fill = t.pressed;
     v.widgets.open.weak_bg_fill = t.pressed;
+    if !t.dark {
+        v.extreme_bg_color = t.hover;
+        v.widgets.inactive.weak_bg_fill = t.field_bg;
+        for w in [&mut v.widgets.inactive, &mut v.widgets.hovered, &mut v.widgets.active, &mut v.widgets.open] {
+            w.bg_stroke = Stroke::new(1.0, t.text_dim);
+            w.fg_stroke = Stroke::new(1.5, t.text);
+        }
+    }
     v.window_shadow = egui::epaint::Shadow { offset: [0, 4], blur: 18, spread: 0, color: t.shadow };
     v.popup_shadow = egui::epaint::Shadow { offset: [0, 3], blur: 12, spread: 0, color: t.shadow };
     ctx.set_visuals(v);
@@ -234,6 +242,60 @@ pub fn to_color32(c: deckcraft_color::Rgba) -> Color32 {
 
 #[cfg(test)]
 mod tests {
+    fn contrast(a: egui::Color32, b: egui::Color32) -> f64 {
+        let luminance = |color: egui::Color32| {
+            let linear = |channel: u8| {
+                let s = f64::from(channel) / 255.0;
+                if s <= 0.04045 { s / 12.92 } else { ((s + 0.055) / 1.055).powf(2.4) }
+            };
+            0.2126 * linear(color.r()) + 0.7152 * linear(color.g()) + 0.0722 * linear(color.b())
+        };
+        let (a, b) = (luminance(a), luminance(b));
+        (a.max(b) + 0.05) / (a.min(b) + 0.05)
+    }
+
+    #[test]
+    fn light_inputs_and_checkmarks_have_accessible_contrast() {
+        let ctx = egui::Context::default();
+        let tokens = super::Tokens::light();
+        super::apply(&ctx, &tokens);
+        let style = ctx.global_style();
+        let v = &style.visuals;
+        assert_ne!(v.extreme_bg_color, v.panel_fill);
+        assert_ne!(v.extreme_bg_color, v.window_fill);
+        assert_ne!(v.widgets.inactive.bg_fill, v.panel_fill);
+        for w in [&v.widgets.inactive, &v.widgets.hovered, &v.widgets.active, &v.widgets.open] {
+            assert!(w.bg_stroke.width >= 1.0);
+            assert!(w.fg_stroke.width >= 1.0);
+            for background in [v.panel_fill, v.window_fill, v.extreme_bg_color, w.bg_fill] {
+                assert!(contrast(w.bg_stroke.color, background) >= 3.0, "border against {background:?}");
+                assert!(contrast(w.fg_stroke.color, background) >= 3.0, "checkmark against {background:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn dark_input_visuals_keep_the_existing_style() {
+        let ctx = egui::Context::default();
+        let tokens = super::Tokens::dark();
+        super::apply(&ctx, &tokens);
+        let style = ctx.global_style();
+        let v = &style.visuals;
+        let defaults = egui::Visuals::dark();
+        assert_eq!(v.extreme_bg_color, tokens.field_bg);
+        assert_eq!(v.widgets.inactive.bg_stroke, egui::Stroke::NONE);
+        assert_eq!(v.widgets.hovered.bg_stroke, egui::Stroke::NONE);
+        assert_eq!(v.widgets.inactive.weak_bg_fill, egui::Color32::TRANSPARENT);
+        for (actual, expected) in [
+            (&v.widgets.inactive, &defaults.widgets.inactive),
+            (&v.widgets.hovered, &defaults.widgets.hovered),
+            (&v.widgets.active, &defaults.widgets.active),
+            (&v.widgets.open, &defaults.widgets.open),
+        ] {
+            assert_eq!(actual.fg_stroke, expected.fg_stroke);
+        }
+    }
+
     /// Each character of `text` laid out in the interface fonts at interface sizes, and whether it
     /// has ink (a glyph image).
     fn drawn(text: &str) -> Vec<(char, f32, bool)> {
