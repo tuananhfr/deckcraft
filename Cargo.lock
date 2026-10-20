@@ -952,6 +952,7 @@ dependencies = [
  "i_overlay",
  "image",
  "log",
+ "quick-xml 0.38.4",
  "serde",
  "serde_json",
  "thiserror 2.0.21",

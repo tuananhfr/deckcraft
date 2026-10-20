@@ -7,6 +7,9 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+mod clipboard_html;
+mod clipboard_marker;
+mod clipboard_media;
 pub mod closed;
 pub mod cmd;
 pub mod connect;
@@ -334,7 +337,7 @@ pub struct MediaStatus {
 }
 
 /// Clipboard contents copied within the app.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Clipboard {
     pub shapes: Vec<Shape>,
     pub slides: Vec<Slide>,
@@ -343,6 +346,7 @@ pub struct Clipboard {
     pub text: Option<deckcraft_model::TextBody>,
     pub plain: String,
     /// How many times the shapes were pasted (each paste offsets further).
+    #[serde(skip)]
     pub pastes: u32,
 }
 
@@ -603,6 +607,8 @@ pub(crate) fn push_undo(st: &mut DocState, e: HistoryEntry) {
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_clipboard;
 #[cfg(test)]
 mod tests_documents;
 #[cfg(test)]

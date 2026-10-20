@@ -66,13 +66,49 @@ fn rich_copy_writes_html_and_text_without_eframe_plain_write() {
         h.run_steps(1);
         assert!(!h.output().platform_output.commands.iter().any(|command| matches!(command, egui::OutputCommand::CopyText(_))));
     }
-    assert_eq!(
-        &*writes.borrow(),
-        &[
-            ("<meta charset=\"utf-8\"><p>A &amp; B</p>".to_owned(), "A & B".to_owned()),
-            ("<meta charset=\"utf-8\"><p>A &amp; B</p>".to_owned(), "A & B".to_owned()),
-        ]
-    );
+    let writes = writes.borrow();
+    assert_eq!(writes.len(), 2);
+    for (html, text) in writes.iter() {
+        assert!(html.contains("A &amp; B"));
+        assert!(html.contains("name=\"erpcons-clip\""));
+        assert_eq!(text, "A & B");
+    }
+}
+
+#[test]
+fn empty_payload_never_writes_even_when_copied_is_true() {
+    let calls = Rc::new(Cell::new(0));
+    let sink = calls.clone();
+    let mut h = harness(Services {
+        set_clipboard_html: Some(Box::new(move |_, _| {
+            sink.set(sink.get() + 1);
+            true
+        })),
+        ..Default::default()
+    });
+    h.state_mut().write_clipboard(&json!({"text": "", "html": "", "copied": true}));
+    h.run_steps(1);
+    assert_eq!(calls.get(), 0);
+    assert!(!h.output().platform_output.commands.iter().any(|command| matches!(command, egui::OutputCommand::CopyText(_))));
+}
+
+#[test]
+fn textless_copy_passes_engine_html_and_never_falls_back_to_empty_text() {
+    let writes = Rc::new(RefCell::new(Vec::new()));
+    let sink = writes.clone();
+    let mut h = harness(Services {
+        set_clipboard_html: Some(Box::new(move |html, text| {
+            sink.borrow_mut().push((html.to_owned(), text.to_owned()));
+            false
+        })),
+        ..Default::default()
+    });
+    h.state_mut().run("shape.insert", json!({"preset": "rect", "rect": [10, 10, 100, 40]})).unwrap();
+    let result = h.state_mut().session.execute("edit.copy", &json!({})).unwrap();
+    h.state_mut().write_clipboard(&result);
+    h.run_steps(1);
+    assert_eq!(writes.borrow().as_slice(), &[(result["html"].as_str().unwrap().to_owned(), String::new())]);
+    assert!(!h.output().platform_output.commands.iter().any(|command| matches!(command, egui::OutputCommand::CopyText(_))));
 }
 
 #[test]

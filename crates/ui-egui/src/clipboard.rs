@@ -53,15 +53,16 @@ impl SlideApp {
 
     pub(crate) fn write_clipboard(&mut self, result: &Value) {
         if let Some(text) = copy_text(result) {
+            let html = result.get("html").and_then(Value::as_str).map(str::to_owned).unwrap_or_else(|| plain_html(text));
             self.clipboard_fallback = None;
-            if !self.write_rich_clipboard(text) {
+            if !self.write_rich_clipboard(&html, text) && !text.is_empty() {
                 self.clipboard_fallback = Some(text.to_owned());
             }
         }
     }
 
-    fn write_rich_clipboard(&mut self, text: &str) -> bool {
-        self.services.set_clipboard_html.as_mut().is_some_and(|write| write(&plain_html(text), text))
+    fn write_rich_clipboard(&mut self, html: &str, text: &str) -> bool {
+        self.services.set_clipboard_html.as_mut().is_some_and(|write| write(html, text))
     }
 
     pub(crate) fn flush_clipboard(&mut self, ctx: &egui::Context) {
@@ -101,7 +102,8 @@ impl SlideApp {
 
 pub(crate) fn copy_text(result: &Value) -> Option<&str> {
     let text = result.get("text")?.as_str()?;
-    if result.get("copied").and_then(Value::as_bool).unwrap_or(!text.is_empty()) { Some(text) } else { None }
+    let has_content = !text.is_empty() || result.get("html").and_then(Value::as_str).is_some_and(|html| !html.is_empty());
+    if has_content && result.get("copied").and_then(Value::as_bool).unwrap_or(true) { Some(text) } else { None }
 }
 
 fn plain_html(text: &str) -> String {
