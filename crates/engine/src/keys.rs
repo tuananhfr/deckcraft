@@ -380,4 +380,33 @@ mod tests {
         s.key("Delete", Mods::default()).unwrap();
         assert_eq!(s.doc().unwrap().current_slide().unwrap().shapes.len(), 1);
     }
+
+    #[test]
+    fn typing_on_a_selected_table_goes_into_a_cell() {
+        use deckcraft_model::{ShapeId, ShapeKind};
+        let mut s = Session::with_new();
+        s.prefs.autocorrect = false;
+        s.execute("slide.new", &json!({"layout": "blank"})).unwrap();
+        let table = s.execute("insert.table", &json!({"rows": 2, "cols": 2})).unwrap()["id"].as_u64().unwrap() as u32;
+        s.execute("text.set", &json!({"id": table, "cell": [0, 0], "text": "old"})).unwrap();
+        let cell = |s: &Session, r, c| {
+            let sh = s.doc().unwrap().shape(ShapeId(table)).cloned().unwrap();
+            let ShapeKind::Table(t) = sh.kind else { panic!("not a table") };
+            t.cell(r, c).unwrap().text.text()
+        };
+        // The whole table: its first cell, its text replaced as on any selected shape.
+        s.execute("edit.select", &json!({"ids": [table]})).unwrap();
+        s.type_text("Xin").unwrap();
+        s.type_text(" chào").unwrap();
+        assert_eq!(cell(&s, 0, 0), "Xin chào");
+        assert_eq!(s.doc().unwrap().selection.text.as_ref().and_then(|t| t.cell), Some((0, 0)));
+        // Selected cells: the first of them.
+        s.execute("table.selectCells", &json!({"id": table, "from": [1, 1], "to": [1, 0]})).unwrap();
+        s.type_text("b").unwrap();
+        assert_eq!(cell(&s, 1, 0), "b");
+        assert_eq!(s.doc().unwrap().selection.cells, None);
+        s.key("Escape", Mods::default()).unwrap();
+        assert_eq!(s.key("Enter", Mods::default()).unwrap()["handled"], true);
+        assert_eq!(s.doc().unwrap().selection.text.as_ref().and_then(|t| t.cell), Some((0, 0)));
+    }
 }

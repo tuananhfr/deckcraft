@@ -233,9 +233,16 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
     };
     let sh = shape_of(s, id)?;
     let cell = p.get("cell").and_then(Value::as_array).and_then(|a| Some((a.first()?.as_u64()? as usize, a.get(1)?.as_u64()? as usize)));
+    // A whole table (typing, Enter, Edit Text) edits its selected cells' first one, else its first cell.
+    let cell = match (&sh.kind, cell) {
+        (ShapeKind::Table(t), None) => {
+            let picked = s.doc()?.selection.cells.filter(|c| c.0 == id).map(|(_, a, b)| (a.0.min(b.0), a.1.min(b.1)));
+            Some(picked.filter(|&(r, c)| t.cell(r, c).is_some_and(|x| !x.is_covered())).unwrap_or((0, 0)))
+        }
+        _ => cell,
+    };
     let body = match (&sh.kind, cell) {
         (ShapeKind::Table(t), Some((r, c))) => t.cell(r, c).map(|x| x.text.clone()).ok_or_else(|| bad("text.edit", "no such cell"))?,
-        (ShapeKind::Table(_), None) => return Err(bad("text.edit", "say which `cell` of the table")),
         (ShapeKind::Shape | ShapeKind::Connector { .. }, _) => sh.text.clone().unwrap_or_default(),
         _ => return Err(bad("text.edit", "this object doesn't hold text")),
     };
@@ -253,6 +260,7 @@ fn edit(s: &mut Session, p: &Value) -> Result<Value> {
     }
     s.select(|_, sel| {
         sel.shapes = vec![id];
+        sel.cells = None;
         sel.text = Some(TextSel { shape: id, anchor: at, caret: at, cell, notes: false, line_end: None });
     })?;
     Ok(json!({"id": id, "at": [at.0, at.1]}))
