@@ -86,7 +86,7 @@ fn narrow_title_bar(app: &mut SlideApp, ui: &mut Ui, rect: Rect) {
     let left = rect.min.x + if app.integrated_titlebar { 84.0 } else { 10.0 };
     let right = rect.max.x - 10.0;
     let present = present_width(ui);
-    let fixed = 2.0 * (TITLE_ICON + LEFT_GAP) + TITLE_ICON + RIGHT_GAP + present + TITLE_MIN + 2.0 * TITLE_MARGIN;
+    let fixed = 2.0 * (TITLE_ICON + LEFT_GAP) + 2.0 * (TITLE_ICON + RIGHT_GAP) + present + TITLE_MIN + 2.0 * TITLE_MARGIN;
     let fit = TitleFit::new(right - left, fixed, |item| match item {
         TitleItem::Appearance | TitleItem::Comments => TITLE_ICON + RIGHT_GAP,
         TitleItem::PlayFromStart | TitleItem::Home | TitleItem::Redo => TITLE_ICON + LEFT_GAP,
@@ -110,6 +110,9 @@ fn narrow_title_bar(app: &mut SlideApp, ui: &mut Ui, rect: Rect) {
     let left_end = lui.min_rect().max.x;
     let mut rui = ui.new_child(row(left_end, right, egui::Layout::right_to_left(egui::Align::Center)));
     rui.spacing_mut().item_spacing.x = RIGHT_GAP;
+    if named(icon_toggle(&mut rui, Icon::Close, "Close document", app.session.active().is_some(), false), "Close document").clicked() {
+        app.close_presentation();
+    }
     search_button(app, &mut rui);
     present_button(app, &mut rui);
     if fit.shows(TitleItem::Comments) {

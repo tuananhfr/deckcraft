@@ -18,6 +18,8 @@ struct Failure {
 #[derive(Default)]
 pub struct SaveStatus {
     failures: HashMap<u64, Failure>,
+    // A cancelled save must not authorize Close even if the presentation is already clean.
+    last_save_succeeded: HashMap<u64, bool>,
     /// A desktop Save that waits for the frame showing "Saving…" to be painted before the write
     /// blocks the window: the presentation's uid and that frame's number, once drawn.
     queued: Option<(u64, Option<u64>)>,
@@ -28,6 +30,13 @@ pub enum SaveState {
     Saving,
     /// The reason, as the host or the file system gave it.
     Failed(String),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CloseSaveStep {
+    Waiting,
+    Ready,
+    Stopped,
 }
 
 impl SaveState {
@@ -60,11 +69,28 @@ impl SlideApp {
 
     pub(crate) fn note_saved(&mut self, uid: u64) {
         self.save_status.failures.remove(&uid);
+        self.save_status.last_save_succeeded.insert(uid, true);
     }
 
     pub(crate) fn note_save_failed(&mut self, uid: u64, reason: &str) {
+        self.save_status.last_save_succeeded.insert(uid, false);
         let Some(doc) = self.session.documents().iter().find(|d| d.uid == uid).map(|d| d.doc.clone()) else { return };
         self.save_status.failures.insert(uid, Failure { reason: reason.to_string(), doc });
+    }
+
+    pub(crate) fn note_save_cancelled(&mut self, uid: u64) {
+        self.save_status.last_save_succeeded.insert(uid, false);
+    }
+
+    pub(crate) fn close_save_step(&self, uid: u64) -> CloseSaveStep {
+        if self.save_state(uid) == Some(SaveState::Saving) || self.awaiting_loss_confirmation(uid) {
+            return CloseSaveStep::Waiting;
+        }
+        if self.save_status.last_save_succeeded.get(&uid) == Some(&true) && self.session.documents().iter().any(|d| d.uid == uid && !d.is_dirty()) {
+            CloseSaveStep::Ready
+        } else {
+            CloseSaveStep::Stopped
+        }
     }
 
     /// Save, the button and Ctrl+S. A host that writes synchronously (the desktop) writes on the
@@ -104,5 +130,9 @@ impl SlideApp {
     pub(crate) fn prune_save_failures(&mut self) {
         let docs = self.session.documents();
         self.save_status.failures.retain(|uid, _| docs.iter().any(|d| d.uid == *uid));
+        self.save_status.last_save_succeeded.retain(|uid, _| docs.iter().any(|d| d.uid == *uid));
     }
 }
+
+#[cfg(test)]
+mod tests;

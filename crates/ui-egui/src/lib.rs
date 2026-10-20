@@ -10,6 +10,7 @@ pub mod backstage;
 pub mod canvas;
 pub mod clipboard;
 mod clipboard_keys;
+mod close_document;
 pub mod close_many;
 pub mod control;
 pub mod credits;
@@ -96,6 +97,8 @@ pub struct Services {
     /// Save a presentation as a file the user picks (the browser's save picker, or a download
     /// where there is none). Save and Save As use it over `download` when both are there.
     pub save_file: Option<SaveFileFn>,
+    /// The last open presentation was explicitly closed.
+    pub editor_closed: Option<Box<dyn FnMut()>>,
     pub inbox: Option<Inbox>,
     /// Image on the system clipboard (PNG bytes), when the host can read one.
     pub clipboard_image: Option<Box<dyn FnMut() -> Option<Vec<u8>>>>,
@@ -393,6 +396,7 @@ impl SlideApp {
         }
         // Zoom commands act on the presentation shown, even one switched to since the last frame.
         self.sync_doc_view();
+        let open_before = self.session.documents().len();
         let r = if UI_COMMANDS.iter().any(|c| c.0 == id) {
             self.run_ui(id, &params)
         } else {
@@ -406,6 +410,7 @@ impl SlideApp {
         }
         self.copy_command_result(id, &r);
         self.drain_requests();
+        self.notify_editor_closed(id, open_before, r.is_ok());
         r
     }
 
@@ -450,29 +455,11 @@ impl SlideApp {
         }
     }
 
-    /// File › Close and Ctrl+W: closes the active presentation, asking first when it has unsaved
-    /// changes (Save, Don't Save, Cancel), as PowerPoint does.
-    pub fn close_presentation(&mut self) {
-        if let Some(uid) = self.session.active().map(|d| d.uid) {
-            self.close_document_by_uid(uid);
-        }
-    }
-
-    /// Closes the presentation with `uid` (Close, or its document tab), asking first when it has
-    /// unsaved changes. Closing another presentation keeps the active one active.
-    pub fn close_document_by_uid(&mut self, uid: u64) {
-        let Some((i, d)) = self.session.documents().iter().enumerate().find(|(_, d)| d.uid == uid) else { return };
-        if d.is_dirty() {
-            let mut d = dialogs::Dialog::new("close");
-            d.params = json!({"uid": uid});
-            self.dialog = Some(d);
-        } else {
-            let _ = self.run("file.close", json!({"index": i}));
-        }
-    }
-
     /// Save for presentation `i`, which need not be the active one (that one stays active).
     pub fn save_document(&mut self, i: usize) {
+        if self.session.documents().get(i).is_some_and(|d| self.save_state(d.uid) == Some(save_state::SaveState::Saving)) {
+            return;
+        }
         let active = self.session.active().map(|d| d.uid);
         self.session.set_active(i);
         self.save();
@@ -779,6 +766,8 @@ impl SlideApp {
         if let Some(pick) = self.services.pick_save.as_mut() {
             if let Some(path) = pick(&suggested) {
                 self.save_as_path(&path);
+            } else {
+                self.note_save_cancelled(uid);
             }
         } else if let Some(save) = self.services.save_file.as_mut()
             && let Some(doc) = self.session.active().map(|d| d.doc.clone())
@@ -842,7 +831,11 @@ impl SlideApp {
                         self.note_saved(p.uid);
                     }
                 }
-                SaveOutcome::Cancelled => {}
+                SaveOutcome::Cancelled => {
+                    if !p.copy {
+                        self.note_save_cancelled(p.uid);
+                    }
+                }
                 SaveOutcome::Failed(e) => {
                     if !p.copy {
                         self.note_save_failed(p.uid, &e);
@@ -1603,7 +1596,7 @@ mod tests {
         assert_eq!(harness.state().session.documents().len(), 1, "still open while the picker is");
         settle(&calls, SaveOutcome::Saved);
         harness.run_steps(2);
-        assert!(!harness.state().session.documents()[0].is_dirty(), "settled by the next frame");
+        assert!(harness.state().session.documents().is_empty(), "closed after the write finished");
     }
 
     #[test]

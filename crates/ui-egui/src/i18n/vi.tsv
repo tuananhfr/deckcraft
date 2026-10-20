@@ -1,4 +1,7 @@
 # Vietnamese (vi) interface catalog. Columns, separated by a TAB:
+	Close document	Đóng tài liệu
+	The browser denied permission to save the file. Please allow access and try again.	Trình duyệt không cho phép lưu tệp. Hãy cấp quyền truy cập và thử lại.
+	The browser couldn't save the file. Please try again.	Trình duyệt không lưu được tệp. Vui lòng thử lại.
 	Saving will lose some content	Lưu sẽ mất một số nội dung
 	Save Anyway	Vẫn lưu
 	Save a Copy	Lưu bản sao

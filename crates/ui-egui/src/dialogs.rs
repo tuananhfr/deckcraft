@@ -285,12 +285,13 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
             };
             let Some((i, name, uid)) = target.and_then(|i| app.session.documents().get(i).map(|x| (i, x.title(), x.uid))) else { return true };
             if d.fields.contains_key("lossSaveStarted") {
-                if app.save_state(uid) == Some(crate::save_state::SaveState::Saving) {
-                    ui.label(crate::tl!("Saving…"));
-                    return false;
-                }
-                if app.session.documents().get(i).is_some_and(|d| !d.is_dirty()) {
-                    run(app, "file.close", json!({"index": i}));
+                match app.close_save_step(uid) {
+                    crate::save_state::CloseSaveStep::Waiting => {
+                        ui.label(crate::tl!("Saving…"));
+                        return ui.button(crate::tl!("Cancel")).clicked();
+                    }
+                    crate::save_state::CloseSaveStep::Ready => run(app, "file.close", json!({"index": i})),
+                    crate::save_state::CloseSaveStep::Stopped => {}
                 }
                 return true;
             }
@@ -315,11 +316,16 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
                         egui::Button::new(egui::RichText::new(crate::tl!("Save")).color(t.accent_text)).fill(t.accent).min_size(vec2(72.0, 24.0)),
                     );
                     if save.clicked() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
+                        d.fields.insert("lossSaveStarted".into(), "1".into());
                         app.save_document(i);
-                        if app.session.documents().get(i).is_some_and(|d| d.uid == uid && !d.is_dirty()) {
-                            run(app, "file.close", json!({"index": i}));
+                        match app.close_save_step(uid) {
+                            crate::save_state::CloseSaveStep::Ready => {
+                                run(app, "file.close", json!({"index": i}));
+                                done = true;
+                            }
+                            crate::save_state::CloseSaveStep::Stopped => done = true,
+                            crate::save_state::CloseSaveStep::Waiting => {}
                         }
-                        done = true;
                     }
                     if ui.add(egui::Button::new(crate::tl!("Cancel")).min_size(vec2(72.0, 24.0))).clicked() {
                         done = true;

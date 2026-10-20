@@ -49,7 +49,7 @@ pub fn start() {
                     }
                     let inbox: Inbox = Inbox::default();
                     let clipboard = ClipboardBridge::install(cc.egui_ctx.clone()).ok();
-                    let mut app = SlideApp::new(Session::new(), services(inbox.clone(), cc.egui_ctx.clone(), clipboard.clone()));
+                    let mut app = SlideApp::new(Session::new(), services(inbox.clone(), cc.egui_ctx.clone(), clipboard.clone(), dirty.clone()));
                     app.ui.language = crate::language::initial();
                     if clipboard.is_none() {
                         app.note_clipboard(deckcraft_ui_egui::clipboard::ClipboardNotice::ReadDenied);
@@ -148,7 +148,7 @@ impl eframe::App for WebShell {
 
 /// Web services: no file paths, so `pick_open`/`pick_save`/`read` stay `None` and the UI falls
 /// back to `open_async` (browser picker → inbox), `save_file` (Save) and `download` (exports).
-fn services(inbox: Inbox, ctx: egui::Context, clipboard: Option<ClipboardBridge>) -> Services {
+fn services(inbox: Inbox, ctx: egui::Context, clipboard: Option<ClipboardBridge>, dirty: Rc<Cell<bool>>) -> Services {
     let open_inbox = inbox.clone();
     let save_ctx = ctx.clone();
     let mut services = Services {
@@ -177,6 +177,11 @@ fn services(inbox: Inbox, ctx: egui::Context, clipboard: Option<ClipboardBridge>
             }
         })),
         save_file: Some(Box::new(move |name: &str, bytes: &[u8], done: SaveDone| save_file(&save_ctx, name, bytes, done))),
+        editor_closed: Some(Box::new(move || {
+            // The hook can navigate away before the next frame refreshes the unload guard.
+            dirty.set(false);
+            crate::closed_hook::notify();
+        })),
         inbox: Some(inbox),
         ..Default::default()
     };
@@ -227,10 +232,9 @@ fn save_file(ctx: &egui::Context, path: &str, bytes: &[u8], done: SaveDone) {
                     let outcome = match wasm_bindgen_futures::JsFuture::from(handle).await {
                         Ok(handle) => match write_file_handle(&handle, &bytes).await {
                             Ok(()) => SaveOutcome::Saved,
-                            Err(e) => SaveOutcome::Failed(e),
+                            Err(e) => e,
                         },
-                        Err(e) if js_error_name(&e) == "AbortError" => SaveOutcome::Cancelled,
-                        Err(e) => SaveOutcome::Failed(js_error_message(&e)),
+                        Err(e) => crate::save_errors::outcome(&js_error_name(&e)),
                     };
                     if let SaveOutcome::Failed(e) = &outcome {
                         log::error!("couldn't save {name}: {e}");
@@ -240,21 +244,25 @@ fn save_file(ctx: &egui::Context, path: &str, bytes: &[u8], done: SaveDone) {
                 });
                 return;
             }
-            Err(e) => log::warn!("showSaveFilePicker failed: {e}; downloading instead"),
+            Err(e) => {
+                done(e);
+                ctx.request_repaint();
+                return;
+            }
         }
     }
     // Firefox and Safari: the browser never says whether the download finished; without counting
     // it as saved the tab would warn about unsaved changes the user just downloaded, forever.
     done(match download(&name, bytes) {
         Ok(()) => SaveOutcome::Saved,
-        Err(e) => SaveOutcome::Failed(e),
+        Err(_) => crate::save_errors::outcome(""),
     });
 }
 
 /// Opens the save picker for `name` (it must be called while the click or key that asked for the
 /// save still counts as a user gesture); the promise resolves to the chosen file's handle.
-fn open_save_picker(picker: &js_sys::Function, name: &str) -> Result<js_sys::Promise, String> {
-    let js = |e: wasm_bindgen::JsValue| format!("{e:?}");
+fn open_save_picker(picker: &js_sys::Function, name: &str) -> Result<js_sys::Promise, SaveOutcome> {
+    let js = |e: wasm_bindgen::JsValue| crate::save_errors::outcome(&js_error_name(&e));
     let key = |k: &str| wasm_bindgen::JsValue::from_str(k);
     let ext = name.rsplit('.').next().map(str::to_ascii_lowercase).unwrap_or_default();
     let exts = js_sys::Array::of1(&key(&format!(".{ext}")));
@@ -271,17 +279,17 @@ fn open_save_picker(picker: &js_sys::Function, name: &str) -> Result<js_sys::Pro
     let options = js_sys::Object::new();
     js_sys::Reflect::set(&options, &key("suggestedName"), &key(name)).map_err(js)?;
     js_sys::Reflect::set(&options, &key("types"), &js_sys::Array::of1(&file_type)).map_err(js)?;
-    let window = web_sys::window().ok_or("no window")?;
-    picker.call1(&window, &options).map_err(js)?.dyn_into::<js_sys::Promise>().map_err(|_| "not a promise".to_string())
+    let window = web_sys::window().ok_or_else(|| crate::save_errors::outcome(""))?;
+    picker.call1(&window, &options).map_err(js)?.dyn_into::<js_sys::Promise>().map_err(|_| crate::save_errors::outcome(""))
 }
 
 /// Writes `bytes` to a picked file and closes it; only then is the file on disk.
-async fn write_file_handle(handle: &wasm_bindgen::JsValue, bytes: &[u8]) -> Result<(), String> {
-    let js = |e: wasm_bindgen::JsValue| js_error_message(&e);
-    let method = |target: &wasm_bindgen::JsValue, name: &str| -> Result<js_sys::Function, String> {
-        js_sys::Reflect::get(target, &wasm_bindgen::JsValue::from_str(name)).map_err(js)?.dyn_into().map_err(|_| format!("{name} is not a function"))
+async fn write_file_handle(handle: &wasm_bindgen::JsValue, bytes: &[u8]) -> Result<(), SaveOutcome> {
+    let js = |e: wasm_bindgen::JsValue| crate::save_errors::outcome(&js_error_name(&e));
+    let method = |target: &wasm_bindgen::JsValue, name: &str| -> Result<js_sys::Function, SaveOutcome> {
+        js_sys::Reflect::get(target, &wasm_bindgen::JsValue::from_str(name)).map_err(js)?.dyn_into().map_err(|_| crate::save_errors::outcome(""))
     };
-    let promise = |v: wasm_bindgen::JsValue| v.dyn_into::<js_sys::Promise>().map_err(|_| "not a promise".to_string());
+    let promise = |v: wasm_bindgen::JsValue| v.dyn_into::<js_sys::Promise>().map_err(|_| crate::save_errors::outcome(""));
     let stream = method(handle, "createWritable")?.call0(handle).map_err(js)?;
     let stream = wasm_bindgen_futures::JsFuture::from(promise(stream)?).await.map_err(js)?;
     let written = method(&stream, "write")?.call1(&stream, &js_sys::Uint8Array::from(bytes)).map_err(js)?;
@@ -294,14 +302,6 @@ async fn write_file_handle(handle: &wasm_bindgen::JsValue, bytes: &[u8]) -> Resu
 /// A DOMException's `name` (`AbortError` when the user cancels the picker).
 fn js_error_name(e: &wasm_bindgen::JsValue) -> String {
     js_sys::Reflect::get(e, &wasm_bindgen::JsValue::from_str("name")).ok().and_then(|v| v.as_string()).unwrap_or_default()
-}
-
-fn js_error_message(e: &wasm_bindgen::JsValue) -> String {
-    js_sys::Reflect::get(e, &wasm_bindgen::JsValue::from_str("message"))
-        .ok()
-        .and_then(|v| v.as_string())
-        .filter(|m| !m.is_empty())
-        .unwrap_or_else(|| format!("{e:?}"))
 }
 
 fn file_name(path: &str) -> String {

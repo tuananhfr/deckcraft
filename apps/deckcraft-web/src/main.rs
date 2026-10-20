@@ -23,9 +23,13 @@
 #[cfg(any(target_arch = "wasm32", test))]
 mod clipboard;
 #[cfg(target_arch = "wasm32")]
+mod closed_hook;
+#[cfg(target_arch = "wasm32")]
 mod draft_bridge;
 #[cfg(target_arch = "wasm32")]
 mod language;
+#[cfg(any(target_arch = "wasm32", test))]
+mod save_errors;
 #[cfg(target_arch = "wasm32")]
 mod web;
 

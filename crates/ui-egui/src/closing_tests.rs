@@ -3,7 +3,7 @@
 //! prompt for every unsaved presentation, and "Saving…" / "Save failed" in the title bar.
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -388,6 +388,126 @@ fn a_reopened_saved_presentation_is_not_marked_edited() {
     let d = h.state().session.active().unwrap();
     assert!(Arc::ptr_eq(&d.doc, &d.saved_doc));
     assert_eq!(crate::ribbon::document_title(h.state()), "Presentation2");
+}
+
+fn count_closes(services: &mut Services) -> Rc<Cell<usize>> {
+    let calls = Rc::new(Cell::new(0));
+    let sink = calls.clone();
+    services.editor_closed = Some(Box::new(move || sink.set(sink.get() + 1)));
+    calls
+}
+
+#[test]
+fn web_close_save_waits_and_notifies_only_after_success() {
+    let (mut services, calls) = picker_services();
+    let closed = count_closes(&mut services);
+    let mut app = app_with(1, services);
+    make_dirty(&mut app, 0);
+    let mut h = harness(app);
+    h.state_mut().close_presentation();
+    h.run_steps(3);
+    h.get_by_label("Save").click();
+    h.run_steps(3);
+    assert_eq!(calls.borrow().len(), 1);
+    assert_eq!(dialog(&h).as_deref(), Some("close"));
+    assert!(h.state().session.active().unwrap().is_dirty());
+    assert_eq!(closed.get(), 0);
+    settle(&mut h, &calls, SaveOutcome::Saved);
+    assert!(h.state().session.documents().is_empty());
+    assert_eq!(closed.get(), 1);
+    h.run_steps(3);
+    assert_eq!(closed.get(), 1);
+}
+
+#[test]
+fn web_close_save_cancel_or_failure_keeps_the_document_open() {
+    for outcome in [SaveOutcome::Cancelled, SaveOutcome::Failed("disk full".into())] {
+        let (mut services, calls) = picker_services();
+        let closed = count_closes(&mut services);
+        let mut app = app_with(1, services);
+        make_dirty(&mut app, 0);
+        let mut h = harness(app);
+        h.state_mut().close_presentation();
+        h.run_steps(3);
+        h.get_by_label("Save").click();
+        h.run_steps(3);
+        settle(&mut h, &calls, outcome);
+        assert_eq!(h.state().session.documents().len(), 1);
+        assert!(h.state().session.active().unwrap().is_dirty());
+        assert!(dialog(&h).is_none());
+        assert_eq!(closed.get(), 0);
+    }
+}
+
+#[test]
+fn close_during_save_waits_without_switching_or_saving_again() {
+    let (mut services, calls) = picker_services();
+    let closed = count_closes(&mut services);
+    let mut app = app_with(2, services);
+    make_dirty(&mut app, 0);
+    let target = app.session.documents().first().unwrap().uid;
+    let active = app.session.active().unwrap().uid;
+    app.save_document(0);
+    app.close_document_by_uid(target);
+    let mut h = harness(app);
+    assert_eq!(calls.borrow().len(), 1);
+    assert_eq!(h.state().session.active().unwrap().uid, active);
+    assert_eq!(dialog(&h).as_deref(), Some("close"));
+    settle(&mut h, &calls, SaveOutcome::Saved);
+    assert_eq!(h.state().session.documents().len(), 1);
+    assert_eq!(h.state().session.active().unwrap().uid, active);
+    assert_eq!(closed.get(), 0);
+}
+
+#[test]
+fn cancelling_close_while_saving_does_not_close_after_success() {
+    let (mut services, calls) = picker_services();
+    let closed = count_closes(&mut services);
+    let mut app = app_with(1, services);
+    make_dirty(&mut app, 0);
+    app.save_document(0);
+    app.close_presentation();
+    let mut h = harness(app);
+    h.get_by_label("Cancel").click();
+    h.run_steps(3);
+    settle(&mut h, &calls, SaveOutcome::Saved);
+    assert_eq!(h.state().session.documents().len(), 1);
+    assert!(!h.state().session.active().unwrap().is_dirty());
+    assert!(dialog(&h).is_none());
+    assert_eq!(closed.get(), 0);
+}
+
+#[test]
+fn phone_close_button_uses_the_close_dialog_on_desktop_and_web() {
+    for web in [false, true] {
+        let services = if web { picker_services().0 } else { Services::default() };
+        let mut app = app_with(1, services);
+        app.ui.language = "vi".into();
+        make_dirty(&mut app, 0);
+        let mut h = Harness::builder().with_size(egui::vec2(390.0, 844.0)).build_ui_state(
+            |ui, app: &mut SlideApp| {
+                app.logic(ui.ctx());
+                app.ui(ui);
+            },
+            app,
+        );
+        h.run_steps(3);
+        let button = h.get_by_label("Đóng tài liệu");
+        assert!(button.rect().left() >= 0.0 && button.rect().right() <= 390.0);
+        assert!(button.rect().top() >= 0.0 && button.rect().bottom() <= crate::ribbon::TITLE_H);
+        button.click();
+        h.run_steps(3);
+        assert_eq!(dialog(&h).as_deref(), Some("close"));
+        h.get_by_label("Hủy").click();
+        h.run_steps(3);
+        assert_eq!(h.state().session.documents().len(), 1);
+        assert!(h.state().session.active().unwrap().is_dirty());
+        h.get_by_label("Đóng tài liệu").click();
+        h.run_steps(3);
+        h.get_by_label("Không Lưu").click();
+        h.run_steps(3);
+        assert!(h.state().session.documents().is_empty());
+    }
 }
 
 /// Renders the tab menu, the Close All prompt (asking, saving, waiting for the next click), the

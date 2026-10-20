@@ -1,5 +1,9 @@
 # ERPCons changes
 
+- Close waits for Save (web): closing a presentation waits for the pending browser write; cancelled or failed saves and edits made during saving keep it open, and browser save errors use translated messages without raw exception details.
+- Narrow-screen close button (both): the title bar keeps a document × reachable at 390 points, with the translated Close document tooltip and the existing Save / Don't Save / Cancel flow.
+- Editor closed hook (web): after the last open presentation is explicitly closed, call the optional ERP shell's no-argument `window.erpEditorClosed` once; standalone pages and desktop need no hook.
+
 - Loss warnings before Save, Save As and Export (both): one translated dialog lists OLE objects reduced to previews, removed digital signatures and macros, and discarded part kinds; Save Anyway proceeds once, Save a Copy preserves the open document's name and saved state, and Cancel writes nothing, including before browser saves start.
 
 This branch (`erpcons`) is the ERPCons Văn phòng fork of [DeckCraft](https://github.com/storytold/deckcraft), based on DeckCraft by the ArtCraft team, licensed MIT OR Apache-2.0 (see `LICENSE-MIT`, `LICENSE-APACHE`, `NOTICE`). Changes from upstream `main` (Apache-2.0 §4b):

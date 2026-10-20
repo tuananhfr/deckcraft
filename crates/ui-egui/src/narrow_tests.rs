@@ -140,13 +140,16 @@ fn phone_title_and_status_bars_never_overlap() {
             &h,
             lang,
             top,
-            &["Home", "Save (⌘S)", "Undo (⌘Z)", "Redo (⌘Y)", "Play from Start (F5)", "Search commands (⇧⌘P)", "Comments", "Light/Dark appearance"],
+            &[
+                "Home", "Save (⌘S)", "Undo (⌘Z)", "Redo (⌘Y)", "Play from Start (F5)", "Search commands (⇧⌘P)", "Comments", "Light/Dark appearance",
+                "Close document",
+            ],
         );
         let present = h.query_all_by_label_contains(i18n::tr(lang, "Present")).map(|n| n.rect()).find(|r| top.intersects(*r));
         bar.push(("Present".into(), present.expect("the Present button stays")));
         let shown_title = h.query_by_label(&title).map(|n| n.rect());
         bar.push(("title".into(), shown_title.unwrap_or_else(|| panic!("the title shows at {width}"))));
-        for must in ["Save (⌘S)", "Undo (⌘Z)", "Search commands (⇧⌘P)"] {
+        for must in ["Save (⌘S)", "Undo (⌘Z)", "Search commands (⇧⌘P)", "Close document"] {
             assert!(bar.iter().any(|(l, _)| l == i18n::tr(lang, must)), "{must} stays at {width}");
         }
         assert_apart("title bar", width, &bar);
