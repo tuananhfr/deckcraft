@@ -80,7 +80,7 @@ fn save_prefs(app: &SlideApp) {
     }
     if let Some(p) = prefs_path() {
         let _ = std::fs::create_dir_all(p.parent().unwrap_or(std::path::Path::new(".")));
-        if let Ok(bytes) = serde_json::to_vec_pretty(&app.ui) {
+        if let Ok(bytes) = serde_json::to_vec_pretty(&app.ui_state_to_save()) {
             let _ = std::fs::write(&p, bytes);
         }
         if let Ok(bytes) = serde_json::to_vec_pretty(&app.session.prefs) {

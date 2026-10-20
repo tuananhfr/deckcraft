@@ -12,15 +12,14 @@ pub fn status_bar(app: &mut SlideApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
     egui::Panel::bottom("status").exact_size(28.0).frame(egui::Frame::NONE.fill(t.chrome)).show(ui, |ui| {
         let rect = ui.max_rect();
-        let Some(st) = app.session.active() else { return };
-        let n = st.doc.slides.len();
-        let left = match st.selection.target {
-            deckcraft_engine::Target::Slides => crate::i18n::fmt(
-                crate::tl!("Slide {n} of {total}"),
-                &[("n", &(st.selection.slide + 1).min(n.max(1)).to_string()), ("total", &n.to_string())],
-            ),
-            _ => crate::tl!("Slide Master").to_string(),
-        };
+        if app.layout.is_narrow() {
+            narrow_status_bar(app, ui, rect);
+            return;
+        }
+        if app.session.active().is_none() {
+            return;
+        }
+        let left = slide_counter(app);
         let p = ui.painter();
         // The English columns are minimums: translated text is longer and pushes the next one right.
         let shown = p.text(pos2(rect.min.x + 14.0, rect.center().y), Align2::LEFT_CENTER, &left, theme::font(12.0), t.text_dim);
@@ -90,6 +89,79 @@ pub fn status_bar(app: &mut SlideApp, ui: &mut Ui) {
         }
         let _ = Stroke::NONE;
     });
+}
+
+/// "Slide 2 of 9" for the selection, or the master being edited.
+fn slide_counter(app: &SlideApp) -> String {
+    let Some(st) = app.session.active() else { return String::new() };
+    let n = st.doc.slides.len();
+    match st.selection.target {
+        deckcraft_engine::Target::Slides => crate::i18n::fmt(
+            crate::tl!("Slide {n} of {total}"),
+            &[("n", &(st.selection.slide + 1).min(n.max(1)).to_string()), ("total", &n.to_string())],
+        ),
+        _ => crate::tl!("Slide Master").to_string(),
+    }
+}
+
+/// A phone-width status bar: the thumbnails, notes and comments switches and the zoom on the
+/// right; on the left the slide counter, or a fresh status message in its place, cut to the room
+/// left. The language, the zoom slider and the view buttons give way (the View tab has them).
+fn narrow_status_bar(app: &mut SlideApp, ui: &mut Ui, rect: Rect) {
+    let t = Tokens::get(ui.ctx());
+    let mut right = ui.new_child(
+        egui::UiBuilder::new()
+            .max_rect(Rect::from_min_max(pos2(rect.min.x + 8.0, rect.min.y), pos2(rect.max.x - 8.0, rect.max.y)))
+            .layout(egui::Layout::right_to_left(egui::Align::Center)),
+    );
+    right.spacing_mut().item_spacing.x = 4.0;
+    let named = |ui: &mut Ui, icon: Icon, tip: &str, on: bool| {
+        let r = small_icon(ui, icon, tip, on);
+        r.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, on, crate::tl!(tip)));
+        r
+    };
+    if named(&mut right, Icon::FitSmall, "Fit slide to current window", false).clicked() {
+        app.ui.zoom = None;
+    }
+    let pct = (app.ui.zoom.unwrap_or(app.canvas_scale) * 100.0).round();
+    let lbl = right.add(egui::Label::new(egui::RichText::new(format!("{pct}%")).size(12.0).color(t.text_dim)).sense(Sense::click()));
+    if lbl.clicked() {
+        app.dialog = Some(crate::dialogs::Dialog::new("zoom"));
+    }
+    right.add_space(4.0);
+    let c_on = app.ui.pane.as_deref() == Some("comments");
+    if named(&mut right, Icon::CommentsSmall, "Comments", c_on).clicked() {
+        let _ = app.run("view.pane", json!({"pane": "comments", "toggle": true}));
+    }
+    if named(&mut right, Icon::NotesSmall, "Notes", app.ui.notes).clicked() {
+        app.ui.notes = !app.ui.notes;
+    }
+    if app.ui.view == ViewMode::Normal && named(&mut right, Icon::ViewNormalSmall, "Slide Thumbnails", app.layout.thumbs).clicked() {
+        let _ = app.run("view.thumbnails", json!({}));
+    }
+    let room = Rect::from_min_max(pos2(rect.min.x + 12.0, rect.min.y), pos2(right.min_rect().min.x - 8.0, rect.max.y));
+    let message = match app.status.clone() {
+        Some((msg, at)) if crate::now_ms() - at < 6000.0 => {
+            ui.ctx().request_repaint_after(std::time::Duration::from_millis(500));
+            Some(crate::tl!(&msg).to_string())
+        }
+        Some(_) => {
+            app.status = None;
+            None
+        }
+        None => None,
+    };
+    let (text, color) = match message {
+        Some(m) => (m, t.accent),
+        None => (slide_counter(app), t.text_dim),
+    };
+    if let Some(g) = crate::narrow::elide(ui, &text, theme::font(12.0), color, room.width()) {
+        let at = pos2(room.min.x, room.center().y - g.size().y / 2.0);
+        let shown = Rect::from_min_size(at, g.size()).intersect(room);
+        ui.interact(shown, ui.id().with("status_text"), Sense::hover())
+            .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &text));
+        ui.painter().with_clip_rect(room).galley(at, g, color);
+    }
 }
 
 fn small_icon(ui: &mut Ui, icon: Icon, tip: &str, on: bool) -> egui::Response {

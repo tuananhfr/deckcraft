@@ -72,7 +72,12 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
     let mut offset: egui::Vec2 = ui.data_mut(|d| d.get_temp(scroll_id).unwrap_or_default());
     let overflow = vec2((content_rect.width() + 56.0 - avail.width()).max(0.0), (content_rect.height() + 56.0 - avail.height()).max(0.0));
     let resp = ui.allocate_rect(avail, Sense::click_and_drag());
-    let (wheel, zoom_delta, pinch_pos) = ui.input(|i| (i.smooth_scroll_delta, i.zoom_delta(), i.pointer.hover_pos()));
+    let (wheel, zoom_delta, pinch_pos, two_fingers) =
+        ui.input(|i| (i.smooth_scroll_delta, i.zoom_delta(), i.pointer.hover_pos(), i.multi_touch().is_some()));
+    // A finger dragging away from the selection pans (when the slide is larger than the window).
+    if app.touch.active && app.canvas_touch.panning() && resp.dragged() && !two_fingers {
+        offset -= resp.drag_delta();
+    }
     if resp.hovered() {
         if (zoom_delta - 1.0).abs() > 1e-3 {
             let cur = app.ui.zoom.unwrap_or(scale);
@@ -367,6 +372,12 @@ fn ruler(p: &egui::Painter, avail: Rect, slide: Rect, scale: f32, t: &Tokens) {
 }
 
 fn pointer(app: &mut SlideApp, ui: &Ui, resp: &egui::Response, xf: Xf) {
+    if !app.touch.active {
+        app.canvas_touch.press = None;
+    } else if app.session.tool.kind == ToolKind::Select && (app.canvas_touch.press.is_some() || !app.session.tool.dragging()) {
+        touch_pointer(app, ui, resp, xf);
+        return;
+    }
     let tol = (4.0 / xf.scale) as f64;
     let m = mods(ui);
     let Some(pos) = resp.interact_pointer_pos().or(resp.hover_pos()) else { return };
@@ -421,6 +432,106 @@ fn pointer(app: &mut SlideApp, ui: &Ui, resp: &egui::Response, xf: Xf) {
     if app.session.tool.dragging() {
         ui.ctx().request_repaint();
     }
+}
+
+/// A finger on the canvas with the Select tool. The engine hears of a press only once the finger
+/// moves on the selection (a drag there) or lifts (a tap is a click), so a pan never moves a shape.
+fn touch_pointer(app: &mut SlideApp, ui: &Ui, resp: &egui::Response, xf: Xf) {
+    use crate::touch::{CanvasPress, Owner};
+    let tol = (crate::touch::FINGER_TOLERANCE / xf.scale) as f64;
+    let m = mods(ui);
+    let ev = |kind, at: Pos2| {
+        let p = xf.to_slide(at);
+        PointerEvent { kind, x: p.x, y: p.y, mods: m, tol }
+    };
+    let (pressed, down, two_fingers) =
+        ui.input(|i| (i.pointer.button_pressed(egui::PointerButton::Primary), i.pointer.primary_down(), i.multi_touch().is_some()));
+    let pos = resp.interact_pointer_pos().or(resp.hover_pos());
+    if pressed
+        && resp.hovered()
+        && let Some(at) = pos
+    {
+        let owner = if engine_owns(&app.session, xf.to_slide(at), tol) { Owner::Engine } else { Owner::Pan };
+        app.canvas_touch.press = Some(CanvasPress { at, owner, started: false });
+    }
+    let Some(mut press) = app.canvas_touch.press else { return };
+    // A second finger makes it a pinch, not a tap or a drag.
+    if two_fingers && !press.started {
+        app.canvas_touch.press = None;
+        return;
+    }
+    if resp.long_touched() {
+        // The context menu opens next (egui's long press); it acts on what is under the finger.
+        select_at(app, xf.to_slide(press.at), tol);
+        app.canvas_touch.press = None;
+        return;
+    }
+    let mut results = vec![];
+    if resp.dragged() && press.owner == Owner::Engine {
+        if !press.started {
+            results.push(app.session.pointer(ev(PointerKind::Down, press.at)));
+            press.started = true;
+        }
+        if let Some(at) = pos {
+            results.push(app.session.pointer(ev(PointerKind::Drag, at)));
+        }
+    }
+    if down {
+        app.canvas_touch.press = Some(press);
+    } else {
+        if resp.clicked() {
+            results.push(app.session.pointer(ev(PointerKind::Down, press.at)));
+            if resp.triple_clicked() {
+                results.push(app.session.pointer(ev(PointerKind::TripleClick, press.at)));
+            } else if resp.double_clicked() {
+                results.push(app.session.pointer(ev(PointerKind::DoubleClick, press.at)));
+            }
+            results.push(app.session.pointer(ev(PointerKind::Up, press.at)));
+        } else if press.started {
+            results.push(app.session.pointer(ev(PointerKind::Up, pos.unwrap_or(press.at))));
+        }
+        app.canvas_touch.press = None;
+    }
+    for r in results {
+        if let Err(e) = r {
+            app.set_status(e.to_string());
+        }
+    }
+    if app.session.tool.dragging() {
+        ui.ctx().request_repaint();
+    }
+}
+
+/// A finger at `p` (slide points) acts on the selection: it is on a selected shape, a handle, or
+/// the text being edited.
+fn engine_owns(session: &deckcraft_engine::Session, p: Point, tol: f64) -> bool {
+    let Some(st) = session.active() else { return false };
+    if let Some(ts) = &st.selection.text
+        && !ts.notes
+        && ts.cell.is_none()
+        && let Some(sh) = st.shape(ts.shape)
+        && deckcraft_engine::cmd::xfrm_of(&st.doc, &st.selection, sh).bounds().inflate(tol, tol).contains(p)
+    {
+        return true;
+    }
+    match session.hit_test(p, tol) {
+        Some(Hit::Shape { id, .. }) => st.selection.shapes.contains(&id),
+        // Handles belong to the selection.
+        Some(_) => true,
+        None => false,
+    }
+}
+
+/// A long press selects the shape under the finger (keeping a selection it is part of, or the
+/// text being edited), or clears the selection on an empty spot, so its menu fits what was pressed.
+fn select_at(app: &mut SlideApp, p: Point, tol: f64) {
+    if engine_owns(&app.session, p, tol) {
+        return;
+    }
+    let _ = match app.session.hit_test(p, tol) {
+        Some(Hit::Shape { id, .. }) => app.run("edit.select", json!({"ids": [id.0]})),
+        _ => app.run("edit.deselect", json!({})),
+    };
 }
 
 fn poly(p: &egui::Painter, pts: [Pos2; 4], stroke: Stroke) {

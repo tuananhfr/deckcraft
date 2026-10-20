@@ -42,6 +42,8 @@ pub struct Show {
     last_viewed: Option<usize>,
     /// Click areas of hyperlinks and shape actions on slide `.0`, in slide points.
     links: Option<(usize, Vec<deckcraft_render::PlacedLink>)>,
+    /// A finger swiping sideways changes slides.
+    swipe: crate::touch::SwipeTracker,
 }
 
 #[derive(Clone, PartialEq)]
@@ -99,6 +101,7 @@ impl Show {
             media_slide: None,
             last_viewed: None,
             links: None,
+            swipe: Default::default(),
         }
     }
 
@@ -263,14 +266,18 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
         show.after_enter(&doc, now);
     }
     let mut keep = true;
-    // Input.
-    let (keys, clicked, secondary, moved) = ctx.input(|i| {
+    // Input. A tap that opens or dismisses the long-press menu, or picks from it, is not a click
+    // on the slide.
+    let menu_id = ui.id().with("show_menu");
+    let menu_open = egui::Popup::is_id_open(&ctx, menu_id);
+    let (keys, clicked, secondary, moved, swipe) = ctx.input(|i| {
         let keys: Vec<(egui::Key, egui::Modifiers)> = i
             .events
             .iter()
             .filter_map(|e| if let egui::Event::Key { key, pressed: true, modifiers, .. } = e { Some((*key, *modifiers)) } else { None })
             .collect();
-        (keys, i.pointer.primary_clicked(), i.pointer.secondary_clicked(), i.pointer.delta().length() > 0.0)
+        let swipe = show.swipe.feed(&i.events).filter(|_| app.touch.active && !show.pen && !menu_open);
+        (keys, i.pointer.primary_clicked() && !menu_open, i.pointer.secondary_clicked() && !menu_open, i.pointer.delta().length() > 0.0, swipe)
     });
     if moved {
         show.last_move = now;
@@ -341,6 +348,15 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
     }
     if secondary && !show.ended {
         actions.push(show.state.prev(&doc));
+    }
+    match swipe {
+        Some(crate::touch::Swipe::Next) if show.ended => keep = false,
+        Some(crate::touch::Swipe::Next) => actions.push(show.state.next(&doc)),
+        Some(crate::touch::Swipe::Previous) => {
+            show.ended = false;
+            actions.push(show.state.prev(&doc));
+        }
+        None => {}
     }
     // Apply input first: a step started by this click must restart the clock before it is read.
     for a in actions.drain(..) {
@@ -567,8 +583,11 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
     if let Some(c) = show.blank {
         painter.rect_filled(full, CornerRadius::ZERO, c);
     }
-    // Pen.
-    let resp = ui.interact(full, ui.id().with("show_pen"), if show.pen { Sense::drag() } else { Sense::hover() });
+    // Pen. Without it the slide senses clicks, for egui's long press on touch screens.
+    let resp = ui.interact(full, ui.id().with("show_pen"), if show.pen { Sense::drag() } else { Sense::click() });
+    if !show_menu(&resp, menu_id, &mut show, &doc, now) {
+        keep = false;
+    }
     if show.pen {
         if resp.drag_started() {
             show.strokes.push(vec![]);
@@ -693,6 +712,29 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
         let last = show.state.slide;
         let _ = app.run("slide.go", json!({"index": last}));
     }
+}
+
+/// The menu a long press opens on a touch screen (a right-click keeps going back a slide). Returns
+/// false when it ends the show.
+fn show_menu(resp: &egui::Response, id: egui::Id, show: &mut Show, doc: &Presentation, now: f64) -> bool {
+    let open = resp.long_touched().then_some(egui::SetOpenCommand::Bool(true));
+    let mut keep = true;
+    egui::Popup::menu(resp).id(id).open_memory(open).at_pointer_fixed().show(|ui| {
+        if ui.button(crate::tl!("Next Slide")).clicked() {
+            let a = show.state.next(doc);
+            keep &= show.apply(a, doc, now);
+        }
+        if ui.button(crate::tl!("Previous Slide")).clicked() {
+            show.ended = false;
+            let a = show.state.prev(doc);
+            keep &= show.apply(a, doc, now);
+        }
+        ui.separator();
+        if ui.button(crate::tl!("End Show")).clicked() {
+            keep = false;
+        }
+    });
+    keep
 }
 
 /// Start the media of a newly shown slide: media from the previous slide stops unless it plays

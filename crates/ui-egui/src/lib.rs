@@ -20,6 +20,7 @@ pub mod i18n;
 pub mod icons;
 pub mod media;
 pub mod menus;
+pub mod narrow;
 pub mod panes;
 pub mod ribbon;
 pub mod selpane;
@@ -31,6 +32,7 @@ pub mod textures;
 pub mod theme;
 pub mod thumbs;
 pub mod toast;
+pub mod touch;
 pub mod uifonts;
 pub mod widgets;
 
@@ -173,6 +175,7 @@ pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
     ("view.reading", "Reading View", None, "{}"),
     ("view.notes", "Notes", None, "{on?: bool}"),
     ("view.ruler", "Ruler", None, "{on?: bool}"),
+    ("view.thumbnails", "Slide Thumbnails", None, "{on?: bool}"),
     ("view.gridlines", "Gridlines", Some("Shift+F9"), "{on?: bool}"),
     ("view.guides", "Guides", Some("Alt+F9"), "{on?: bool}"),
     ("view.zoomIn", "Zoom In", Some("Cmd+="), "{}"),
@@ -273,6 +276,10 @@ pub struct SlideApp {
     next_save: u64,
     /// Each open presentation's zoom while another one is shown.
     doc_views: docview::DocViews,
+    /// Phone-width layout: the folded ribbon and the hidden thumbnails (`narrow`).
+    pub layout: narrow::NarrowLayout,
+    pub touch: touch::TouchInput,
+    pub(crate) canvas_touch: touch::CanvasTouch,
 }
 
 /// A save the host hasn't finished: the presentation as it was written, by document uid.
@@ -326,6 +333,9 @@ impl SlideApp {
             save_results: Default::default(),
             next_save: 0,
             doc_views: Default::default(),
+            layout: Default::default(),
+            touch: Default::default(),
+            canvas_touch: Default::default(),
         }
     }
 
@@ -547,6 +557,7 @@ impl SlideApp {
             "view.reading" => self.start_show(self.session.active().map(|d| d.selection.slide).unwrap_or(0), true),
             "view.notes" => self.ui.notes = self.flag(p, self.ui.notes),
             "view.ruler" => self.ui.ruler = self.flag(p, self.ui.ruler),
+            "view.thumbnails" => self.layout.thumbs = self.flag(p, self.layout.thumbs),
             "view.gridlines" => self.ui.gridlines = self.flag(p, self.ui.gridlines),
             "view.guides" => self.ui.guides = self.flag(p, self.ui.guides),
             "view.zoomIn" | "view.zoomOut" => {
@@ -660,8 +671,10 @@ impl SlideApp {
 
     pub fn start_show(&mut self, from: usize, reading: bool) {
         self.media.stop_owned(media::Owner::Editor);
+        // A phone has one screen: Presenter View would cover the show.
+        let presenter = self.ui.presenter_view && !reading && !self.layout.is_narrow();
         if let Some(d) = self.session.active() {
-            self.show = Some(show::Show::new(&d.doc, from, reading, self.ui.presenter_view && !reading));
+            self.show = Some(show::Show::new(&d.doc, from, reading, presenter));
         }
     }
 
@@ -788,6 +801,14 @@ impl SlideApp {
         if let Some(a) = active {
             self.session.set_active(a);
         }
+    }
+
+    /// The interface settings to persist: while the window is narrow, the ribbon keeps the state
+    /// the user chose for a wide window.
+    pub fn ui_state_to_save(&self) -> UiState {
+        let mut ui = self.ui.clone();
+        ui.ribbon_collapsed = self.layout.saved_ribbon_collapsed(ui.ribbon_collapsed);
+        ui
     }
 
     /// The interface fonts are installed: files can be opened (`Services::inbox` waits for this).
@@ -1125,6 +1146,8 @@ impl SlideApp {
         }
         let t0 = now_ms();
         let t = theme::Tokens::get(&ctx);
+        ctx.input(|i| self.touch.observe(&i.events));
+        self.layout.update(ui.max_rect().width(), &mut self.ui.ribbon_collapsed);
         self.tick_media(&ctx);
         if self.show.is_some() {
             show::ui(self, ui);
@@ -1159,7 +1182,7 @@ impl SlideApp {
                     }
                     if self.ui.view == ViewMode::Outline {
                         sorter::outline_pane(self, ui);
-                    } else {
+                    } else if self.layout.thumbs {
                         thumbs::show(self, ui);
                     }
                     egui::CentralPanel::default().frame(egui::Frame::NONE.fill(t.canvas)).show(ui, |ui| {
@@ -1332,6 +1355,12 @@ mod ime_tests;
 
 #[cfg(test)]
 mod open_refused_tests;
+
+#[cfg(test)]
+mod narrow_tests;
+
+#[cfg(test)]
+mod touch_tests;
 
 #[cfg(test)]
 mod tests {

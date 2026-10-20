@@ -38,6 +38,10 @@ pub fn title_bar(app: &mut SlideApp, ui: &mut Ui) {
             let max = ui.input(|i| i.viewport().maximized.unwrap_or(false));
             ui.ctx().send_viewport_cmd(egui::ViewportCommand::Maximized(!max));
         }
+        if app.layout.is_narrow() {
+            narrow_title_bar(app, ui, rect);
+            return;
+        }
         let left = if app.integrated_titlebar { 84.0 } else { 10.0 };
         let mut child = ui.new_child(
             egui::UiBuilder::new()
@@ -45,29 +49,12 @@ pub fn title_bar(app: &mut SlideApp, ui: &mut Ui) {
                 .layout(egui::Layout::left_to_right(egui::Align::Center)),
         );
         child.spacing_mut().item_spacing.x = 2.0;
-        let has_doc = app.session.active().is_some();
-        let dirty = app.session.active().is_some_and(|d| d.is_dirty());
-        if icon_toggle(&mut child, Icon::Home, "Home", true, app.backstage_open()).clicked() {
-            let _ = app.run("app.home", json!({}));
-        }
-        if icon_toggle(&mut child, Icon::Save, "Save (⌘S)", has_doc, false).clicked() {
-            app.save();
-        }
-        if icon_toggle(&mut child, Icon::Undo, "Undo (⌘Z)", enabled(app, "edit.undo"), false).clicked() {
-            run(app, "edit.undo", json!({}));
-        }
-        if icon_toggle(&mut child, Icon::Redo, "Redo (⌘Y)", enabled(app, "edit.redo"), false).clicked() {
-            run(app, "edit.redo", json!({}));
-        }
-        if icon_toggle(&mut child, Icon::PlayFromStart, "Play from Start (F5)", has_doc, false).clicked() {
-            app.start_show(0, false);
-        }
-        let title = app
-            .session
-            .active()
-            .map(|d| format!("{}{}", d.title(), if dirty { format!(" — {}", crate::tl!("Edited")) } else { String::new() }))
-            .unwrap_or_else(|| "DeckCraft".into());
-        ui.painter().text(rect.center(), Align2::CENTER_CENTER, title, theme::font(13.0), t.text);
+        home_button(app, &mut child);
+        save_button(app, &mut child);
+        undo_button(app, &mut child);
+        redo_button(app, &mut child);
+        play_from_start_button(app, &mut child);
+        ui.painter().text(rect.center(), Align2::CENTER_CENTER, document_title(app), theme::font(13.0), t.text);
         // Right side.
         let mut right = ui.new_child(
             egui::UiBuilder::new()
@@ -75,34 +62,156 @@ pub fn title_bar(app: &mut SlideApp, ui: &mut Ui) {
                 .layout(egui::Layout::right_to_left(egui::Align::Center)),
         );
         right.spacing_mut().item_spacing.x = 6.0;
-        if icon_toggle(&mut right, Icon::Search, "Search commands (⇧⌘P)", true, false).clicked() {
-            app.palette = Some((String::new(), 0));
-        }
-        let share = right.add(
-            egui::Button::new(egui::RichText::new(format!("  {}  ", crate::tl!("Present"))).color(t.accent_text).font(theme::bold(13.0)))
-                .fill(t.accent)
-                .corner_radius(CornerRadius::same(13))
-                .min_size(vec2(84.0, 26.0)),
-        );
-        if share.clicked() && has_doc {
-            let from = app.session.active().map(|d| d.selection.slide).unwrap_or(0);
-            app.start_show(from, false);
-        }
-        if icon_toggle(&mut right, Icon::CommentsBubble, "Comments", has_doc, app.ui.pane.as_deref() == Some("comments")).clicked() {
-            let _ = app.run("view.pane", json!({"pane": "comments", "toggle": true}));
-        }
-        if icon_toggle(
-            &mut right,
-            if app.ui.brightness == theme::Brightness::Dark { Icon::Sparkle } else { Icon::Palette },
-            "Light/Dark appearance",
-            true,
-            false,
-        )
-        .clicked()
-        {
-            let _ = app.run("view.dark", json!({}));
-        }
+        search_button(app, &mut right);
+        present_button(app, &mut right);
+        comments_button(app, &mut right);
+        appearance_button(app, &mut right);
     });
+}
+
+/// Width of a title-bar icon button and the gaps after it, left and right of the title.
+const TITLE_ICON: f32 = 24.0;
+const LEFT_GAP: f32 = 2.0;
+const RIGHT_GAP: f32 = 6.0;
+/// Room the document title keeps before optional controls give way, and its margins.
+const TITLE_MIN: f32 = 90.0;
+const TITLE_MARGIN: f32 = 8.0;
+
+/// A phone-width title bar: the optional controls give way (`narrow::TITLE_DROP_ORDER`) until the
+/// rest fits, and the title, cut with "…", takes the room between the two groups or is left out.
+fn narrow_title_bar(app: &mut SlideApp, ui: &mut Ui, rect: Rect) {
+    use crate::narrow::{TitleFit, TitleItem};
+    let t = Tokens::get(ui.ctx());
+    let left = rect.min.x + if app.integrated_titlebar { 84.0 } else { 10.0 };
+    let right = rect.max.x - 10.0;
+    let present = present_width(ui);
+    let fixed = 2.0 * (TITLE_ICON + LEFT_GAP) + TITLE_ICON + RIGHT_GAP + present + TITLE_MIN + 2.0 * TITLE_MARGIN;
+    let fit = TitleFit::new(right - left, fixed, |item| match item {
+        TitleItem::Appearance | TitleItem::Comments => TITLE_ICON + RIGHT_GAP,
+        TitleItem::PlayFromStart | TitleItem::Home | TitleItem::Redo => TITLE_ICON + LEFT_GAP,
+    });
+    let row = |x0: f32, x1: f32, layout: egui::Layout| {
+        egui::UiBuilder::new().max_rect(Rect::from_min_max(pos2(x0, rect.min.y), pos2(x1.max(x0), rect.max.y))).layout(layout)
+    };
+    let mut lui = ui.new_child(row(left, right, egui::Layout::left_to_right(egui::Align::Center)));
+    lui.spacing_mut().item_spacing.x = LEFT_GAP;
+    if fit.shows(TitleItem::Home) {
+        home_button(app, &mut lui);
+    }
+    save_button(app, &mut lui);
+    undo_button(app, &mut lui);
+    if fit.shows(TitleItem::Redo) {
+        redo_button(app, &mut lui);
+    }
+    if fit.shows(TitleItem::PlayFromStart) {
+        play_from_start_button(app, &mut lui);
+    }
+    let left_end = lui.min_rect().max.x;
+    let mut rui = ui.new_child(row(left_end, right, egui::Layout::right_to_left(egui::Align::Center)));
+    rui.spacing_mut().item_spacing.x = RIGHT_GAP;
+    search_button(app, &mut rui);
+    present_button(app, &mut rui);
+    if fit.shows(TitleItem::Comments) {
+        comments_button(app, &mut rui);
+    }
+    if fit.shows(TitleItem::Appearance) {
+        appearance_button(app, &mut rui);
+    }
+    let gap = Rect::from_min_max(pos2(left_end + TITLE_MARGIN, rect.min.y), pos2(rui.min_rect().min.x - TITLE_MARGIN, rect.max.y));
+    let title = document_title(app);
+    if let Some(g) = crate::narrow::elide(ui, &title, theme::font(13.0), t.text, gap.width()) {
+        let at = pos2(gap.center().x - g.size().x / 2.0, gap.center().y - g.size().y / 2.0);
+        let shown = Rect::from_min_size(at, g.size()).intersect(gap);
+        ui.interact(shown, ui.id().with("doc_title"), Sense::hover())
+            .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &title));
+        ui.painter().with_clip_rect(gap).galley(at, g, t.text);
+    }
+}
+
+/// An icon button known by its tooltip to screen readers and tests.
+fn named(resp: egui::Response, tip: &str) -> egui::Response {
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, resp.enabled(), crate::tl!(tip)));
+    resp
+}
+
+fn document_title(app: &SlideApp) -> String {
+    let dirty = app.session.active().is_some_and(|d| d.is_dirty());
+    app.session
+        .active()
+        .map(|d| format!("{}{}", d.title(), if dirty { format!(" — {}", crate::tl!("Edited")) } else { String::new() }))
+        .unwrap_or_else(|| "DeckCraft".into())
+}
+
+fn home_button(app: &mut SlideApp, ui: &mut Ui) {
+    if named(icon_toggle(ui, Icon::Home, "Home", true, app.backstage_open()), "Home").clicked() {
+        let _ = app.run("app.home", json!({}));
+    }
+}
+
+fn save_button(app: &mut SlideApp, ui: &mut Ui) {
+    if named(icon_toggle(ui, Icon::Save, "Save (⌘S)", app.session.active().is_some(), false), "Save (⌘S)").clicked() {
+        app.save();
+    }
+}
+
+fn undo_button(app: &mut SlideApp, ui: &mut Ui) {
+    if named(icon_toggle(ui, Icon::Undo, "Undo (⌘Z)", enabled(app, "edit.undo"), false), "Undo (⌘Z)").clicked() {
+        run(app, "edit.undo", json!({}));
+    }
+}
+
+fn redo_button(app: &mut SlideApp, ui: &mut Ui) {
+    if named(icon_toggle(ui, Icon::Redo, "Redo (⌘Y)", enabled(app, "edit.redo"), false), "Redo (⌘Y)").clicked() {
+        run(app, "edit.redo", json!({}));
+    }
+}
+
+fn play_from_start_button(app: &mut SlideApp, ui: &mut Ui) {
+    let on = app.session.active().is_some();
+    if named(icon_toggle(ui, Icon::PlayFromStart, "Play from Start (F5)", on, false), "Play from Start (F5)").clicked() {
+        app.start_show(0, false);
+    }
+}
+
+fn search_button(app: &mut SlideApp, ui: &mut Ui) {
+    if named(icon_toggle(ui, Icon::Search, "Search commands (⇧⌘P)", true, false), "Search commands (⇧⌘P)").clicked() {
+        app.palette = Some((String::new(), 0));
+    }
+}
+
+fn present_text(ui: &Ui) -> egui::RichText {
+    let t = Tokens::get(ui.ctx());
+    egui::RichText::new(format!("  {}  ", crate::tl!("Present"))).color(t.accent_text).font(theme::bold(13.0))
+}
+
+/// The Present button's width in the current language.
+fn present_width(ui: &Ui) -> f32 {
+    let text = present_text(ui).text().to_string();
+    let w = ui.fonts_mut(|f| f.layout_no_wrap(text, theme::bold(13.0), Color32::WHITE).size().x);
+    (w + 2.0 * ui.spacing().button_padding.x).max(84.0)
+}
+
+fn present_button(app: &mut SlideApp, ui: &mut Ui) {
+    let t = Tokens::get(ui.ctx());
+    let share = ui.add(egui::Button::new(present_text(ui)).fill(t.accent).corner_radius(CornerRadius::same(13)).min_size(vec2(84.0, 26.0)));
+    if share.clicked() && app.session.active().is_some() {
+        let from = app.session.active().map(|d| d.selection.slide).unwrap_or(0);
+        app.start_show(from, false);
+    }
+}
+
+fn comments_button(app: &mut SlideApp, ui: &mut Ui) {
+    let on = app.ui.pane.as_deref() == Some("comments");
+    if named(icon_toggle(ui, Icon::CommentsBubble, "Comments", app.session.active().is_some(), on), "Comments").clicked() {
+        let _ = app.run("view.pane", json!({"pane": "comments", "toggle": true}));
+    }
+}
+
+fn appearance_button(app: &mut SlideApp, ui: &mut Ui) {
+    let icon = if app.ui.brightness == theme::Brightness::Dark { Icon::Sparkle } else { Icon::Palette };
+    if named(icon_toggle(ui, icon, "Light/Dark appearance", true, false), "Light/Dark appearance").clicked() {
+        let _ = app.run("view.dark", json!({}));
+    }
 }
 
 /// Which contextual tabs apply to the selection.
@@ -147,55 +256,15 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
     egui::Panel::top("ribbon").exact_size(h).frame(egui::Frame::NONE.fill(t.chrome)).show(ui, |ui| {
         let rect = ui.max_rect();
         // Tabs. File comes first and opens the File tab's full-window view (Backstage), as in
-        // PowerPoint.
-        let mut x = rect.min.x + 12.0;
-        let y = rect.min.y + 2.0;
-        {
-            let file = crate::tl!("File");
-            let w = ui.fonts_mut(|f| f.layout_no_wrap(file.to_string(), theme::font(13.0), t.text).size().x) + 18.0;
-            let r = Rect::from_min_size(pos2(x, y), vec2(w, 24.0));
-            let resp = ui.interact(r, ui.id().with("tab_file"), Sense::click());
-            resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "File"));
-            if resp.hovered() {
-                ui.painter().rect_filled(r.shrink2(vec2(2.0, 2.0)), CornerRadius::same(4), t.hover);
-            }
-            ui.painter().text(r.center(), Align2::CENTER_CENTER, file, theme::font(13.0), t.text);
-            if resp.on_hover_text(crate::tl!("File (Alt+F)")).clicked() {
-                app.open_backstage(crate::backstage::Page::Home);
-            }
-            x += w + 2.0;
-        }
-        let all: Vec<(&str, bool)> = TABS.iter().map(|s| (*s, false)).chain(ctx_tabs.iter().map(|s| (*s, true))).collect();
-        for (name, contextual) in all {
-            let font = theme::font(13.0);
-            let shown = crate::tl!(name);
-            let w = ui.fonts_mut(|f| f.layout_no_wrap(shown.to_string(), font.clone(), t.text).size().x) + 18.0;
-            let r = Rect::from_min_size(pos2(x, y), vec2(w, 24.0));
-            let resp = ui.interact(r, ui.id().with(("tab", name)), Sense::click());
-            let active = app.ui.tab == name;
-            if resp.hovered() && !active {
-                ui.painter().rect_filled(r.shrink2(vec2(2.0, 2.0)), CornerRadius::same(4), t.hover);
-            }
-            let col = if contextual { t.contextual } else { t.text };
-            let f = if active { theme::bold(13.0) } else { font };
-            ui.painter().text(r.center(), Align2::CENTER_CENTER, shown, f, col);
-            if active {
-                let uw = (w - 20.0).max(16.0);
-                ui.painter().rect_filled(Rect::from_center_size(pos2(r.center().x, r.max.y - 1.0), vec2(uw, 3.0)), CornerRadius::same(1), t.accent);
-            }
-            if resp.clicked() {
-                if active {
-                    app.ui.ribbon_collapsed = !app.ui.ribbon_collapsed;
-                } else {
-                    app.ui.tab = name.to_string();
-                    app.ui.ribbon_collapsed = false;
-                }
-            }
-            if resp.double_clicked() {
-                app.ui.ribbon_collapsed = !app.ui.ribbon_collapsed;
-            }
-            x += w + 2.0;
-        }
+        // PowerPoint. They scroll sideways when the window is narrower than the row.
+        let strip = Rect::from_min_max(pos2(rect.min.x + 12.0, rect.min.y + 2.0), pos2(rect.max.x - 4.0, rect.min.y + 26.0));
+        let mut sui = ui.new_child(egui::UiBuilder::new().max_rect(strip).layout(egui::Layout::left_to_right(egui::Align::Min)));
+        egui::ScrollArea::horizontal().id_salt("ribbon_tabs").show(&mut sui, |ui| {
+            ui.horizontal_top(|ui| {
+                ui.spacing_mut().item_spacing.x = 2.0;
+                tab_strip(app, ui, &t, &ctx_tabs);
+            });
+        });
         if app.ui.ribbon_collapsed {
             return;
         }
@@ -204,32 +273,95 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
         ui.painter().rect_filled(card.translate(vec2(0.0, 1.0)), CornerRadius::same(10), t.card_border);
         ui.painter().rect_filled(card, CornerRadius::same(10), t.card);
         let inner = Rect::from_min_size(pos2(card.min.x + 10.0, card.min.y + 5.0), vec2(card.width() - 20.0, RIBBON_H));
-        let mut cui = ui.new_child(egui::UiBuilder::new().max_rect(inner).layout(egui::Layout::left_to_right(egui::Align::Min)));
-        cui.set_clip_rect(inner.expand2(vec2(0.0, 3.0)));
-        cui.spacing_mut().item_spacing.x = 1.0;
-        let ui = &mut cui;
+        // Groups past the card's right edge scroll into view; the area reaches 3 points above and
+        // below the groups so their hover outlines aren't clipped.
+        let area = inner.expand2(vec2(0.0, 3.0));
+        let mut cui = ui.new_child(egui::UiBuilder::new().max_rect(area).layout(egui::Layout::left_to_right(egui::Align::Min)));
         let tab = app.ui.tab.clone();
-        match tab.as_str() {
-            "Home" => home(app, ui),
-            "Insert" => insert(app, ui),
-            "Draw" => draw(app, ui),
-            "Design" => design(app, ui),
-            "Transitions" => transitions(app, ui),
-            "Animations" => animations(app, ui),
-            "Slide Show" => slide_show(app, ui),
-            "Record" => record(app, ui),
-            "Review" => review(app, ui),
-            "View" => view(app, ui),
-            "Shape Format" => shape_format(app, ui),
-            "Picture Format" => picture_format(app, ui),
-            "Table Design" => table_design(app, ui),
-            "Layout" => table_layout(app, ui),
-            "Chart Design" => chart_design(app, ui),
-            "Playback" => playback(app, ui),
-            "Slide Master" => slide_master(app, ui),
-            _ => {}
-        }
+        egui::ScrollArea::horizontal().id_salt(("ribbon_card", tab.as_str())).show(&mut cui, |ui| {
+            ui.vertical(|ui| {
+                ui.add_space(3.0);
+                ui.horizontal_top(|ui| {
+                    ui.spacing_mut().item_spacing.x = 1.0;
+                    tab_groups(app, ui, &tab);
+                });
+                ui.add_space(3.0);
+            });
+        });
     });
+}
+
+/// File and the ribbon tabs, left to right.
+fn tab_strip(app: &mut SlideApp, ui: &mut Ui, t: &Tokens, ctx_tabs: &[&'static str]) {
+    {
+        let file = crate::tl!("File");
+        let w = ui.fonts_mut(|f| f.layout_no_wrap(file.to_string(), theme::font(13.0), t.text).size().x) + 18.0;
+        let (r, _) = ui.allocate_exact_size(vec2(w, 24.0), Sense::hover());
+        let resp = ui.interact(r, ui.id().with("tab_file"), Sense::click());
+        resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "File"));
+        if resp.hovered() {
+            ui.painter().rect_filled(r.shrink2(vec2(2.0, 2.0)), CornerRadius::same(4), t.hover);
+        }
+        ui.painter().text(r.center(), Align2::CENTER_CENTER, file, theme::font(13.0), t.text);
+        if resp.on_hover_text(crate::tl!("File (Alt+F)")).clicked() {
+            app.open_backstage(crate::backstage::Page::Home);
+        }
+    }
+    let all: Vec<(&str, bool)> = TABS.iter().map(|s| (*s, false)).chain(ctx_tabs.iter().map(|s| (*s, true))).collect();
+    for (name, contextual) in all {
+        let font = theme::font(13.0);
+        let shown = crate::tl!(name);
+        let w = ui.fonts_mut(|f| f.layout_no_wrap(shown.to_string(), font.clone(), t.text).size().x) + 18.0;
+        let (r, _) = ui.allocate_exact_size(vec2(w, 24.0), Sense::hover());
+        let resp = ui.interact(r, ui.id().with(("tab", name)), Sense::click());
+        let active = app.ui.tab == name;
+        resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, active, shown));
+        if resp.hovered() && !active {
+            ui.painter().rect_filled(r.shrink2(vec2(2.0, 2.0)), CornerRadius::same(4), t.hover);
+        }
+        let col = if contextual { t.contextual } else { t.text };
+        let f = if active { theme::bold(13.0) } else { font };
+        ui.painter().text(r.center(), Align2::CENTER_CENTER, shown, f, col);
+        if active {
+            let uw = (w - 20.0).max(16.0);
+            ui.painter().rect_filled(Rect::from_center_size(pos2(r.center().x, r.max.y - 1.0), vec2(uw, 3.0)), CornerRadius::same(1), t.accent);
+        }
+        if resp.clicked() {
+            if active {
+                app.ui.ribbon_collapsed = !app.ui.ribbon_collapsed;
+            } else {
+                app.ui.tab = name.to_string();
+                app.ui.ribbon_collapsed = false;
+            }
+        }
+        if resp.double_clicked() {
+            app.ui.ribbon_collapsed = !app.ui.ribbon_collapsed;
+        }
+    }
+}
+
+/// The groups of ribbon tab `tab`.
+fn tab_groups(app: &mut SlideApp, ui: &mut Ui, tab: &str) {
+    match tab {
+        "Home" => home(app, ui),
+        "Insert" => insert(app, ui),
+        "Draw" => draw(app, ui),
+        "Design" => design(app, ui),
+        "Transitions" => transitions(app, ui),
+        "Animations" => animations(app, ui),
+        "Slide Show" => slide_show(app, ui),
+        "Record" => record(app, ui),
+        "Review" => review(app, ui),
+        "View" => view(app, ui),
+        "Shape Format" => shape_format(app, ui),
+        "Picture Format" => picture_format(app, ui),
+        "Table Design" => table_design(app, ui),
+        "Layout" => table_layout(app, ui),
+        "Chart Design" => chart_design(app, ui),
+        "Playback" => playback(app, ui),
+        "Slide Master" => slide_master(app, ui),
+        _ => {}
+    }
 }
 
 fn big(app: &mut SlideApp, ui: &mut Ui, icon: Icon, label: &str, id: &str, p: Value) {

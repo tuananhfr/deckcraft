@@ -10,25 +10,29 @@ use crate::theme::{self, Tokens};
 
 pub fn show(app: &mut SlideApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
-    let in_master = app.session.active().is_some_and(|d| d.selection.target != Target::Slides);
-    egui::Panel::left("thumbs")
-        .resizable(true)
-        .default_size(app.ui.thumbs_width)
-        .size_range(150.0..=420.0)
-        .frame(egui::Frame::NONE.fill(t.chrome))
-        .show(ui, |ui| {
-            app.ui.thumbs_width = ui.available_width();
-            if in_master {
-                master_list(app, ui);
-                return;
-            }
-            let uid = app.session.active().map(|d| d.uid);
-            egui::ScrollArea::vertical().id_salt(("thumbs", uid)).auto_shrink([false, false]).show(ui, |ui| {
-                ui.add_space(8.0);
-                list(app, ui);
-                ui.add_space(20.0);
-            });
-        });
+    let frame = egui::Frame::NONE.fill(t.chrome);
+    if app.layout.is_narrow() {
+        let width = app.ui.thumbs_width;
+        crate::narrow::floating_pane(ui, "thumbs", crate::narrow::Side::Left, width, frame, |ui| contents(app, ui));
+        return;
+    }
+    egui::Panel::left("thumbs").resizable(true).default_size(app.ui.thumbs_width).size_range(150.0..=420.0).frame(frame).show(ui, |ui| {
+        app.ui.thumbs_width = ui.available_width();
+        contents(app, ui);
+    });
+}
+
+fn contents(app: &mut SlideApp, ui: &mut Ui) {
+    if app.session.active().is_some_and(|d| d.selection.target != Target::Slides) {
+        master_list(app, ui);
+        return;
+    }
+    let uid = app.session.active().map(|d| d.uid);
+    egui::ScrollArea::vertical().id_salt(("thumbs", uid)).auto_shrink([false, false]).show(ui, |ui| {
+        ui.add_space(8.0);
+        list(app, ui);
+        ui.add_space(20.0);
+    });
 }
 
 fn list(app: &mut SlideApp, ui: &mut Ui) {
