@@ -15,10 +15,16 @@ pub mod cmd;
 pub mod connect;
 pub mod fonts;
 pub mod guard;
+mod html_clip;
+mod html_style;
+mod html_tokens;
 pub mod keys;
 pub mod links;
+mod paste_inherit;
 pub mod recovery;
+mod rich_paste;
 pub mod sample;
+mod table_paste;
 pub mod tools;
 
 use std::sync::Arc;
@@ -612,4 +618,8 @@ mod tests_clipboard;
 #[cfg(test)]
 mod tests_documents;
 #[cfg(test)]
+mod tests_html_clip;
+#[cfg(test)]
 mod tests_keys;
+#[cfg(test)]
+mod tests_rich_paste;

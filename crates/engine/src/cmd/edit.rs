@@ -184,12 +184,21 @@ fn paste(s: &mut Session, p: &Value) -> Result<Value> {
     if let Some(clip) = marker {
         s.clipboard = clip;
     }
-    // External plain text (from the system clipboard) wins when given and differs from ours.
+    let html = str_param(p, "html");
+    let text = str_param(p, "text");
+    let external = html.is_some() || text.is_some_and(|text| text != s.clipboard.plain);
     if !internal
-        && let Some(t) = str_param(p, "text")
-        && t != s.clipboard.plain
+        && external
+        && let Some(result) = crate::rich_paste::external(s, html, text)?
     {
-        return paste_plain(s, t);
+        return Ok(result);
+    }
+    if crate::table_paste::has_target(s)
+        && let [shape] = s.clipboard.shapes.as_slice()
+        && let deckcraft_model::ShapeKind::Table(table) = &shape.kind
+    {
+        let table = table.clone();
+        return crate::table_paste::paste(s, table);
     }
     let editing = s.doc()?.selection.text.is_some();
     if editing {
@@ -250,6 +259,9 @@ fn paste(s: &mut Session, p: &Value) -> Result<Value> {
             Ok(json!({"ids": ids}))
         });
     }
+    if let Some(body) = &clip.text {
+        return crate::rich_paste::body(s, body);
+    }
     if !clip.plain.is_empty() {
         let t = clip.plain.clone();
         return paste_plain(s, &t);
@@ -258,14 +270,7 @@ fn paste(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn paste_plain(s: &mut Session, text: &str) -> Result<Value> {
-    if s.doc()?.selection.text.is_some() {
-        return super::text::insert_text(s, text, None);
-    }
-    // No text box being edited: a new text box with the text.
-    let st = s.doc()?;
-    let size = st.doc.slide_size;
-    let rect = [size.width * 0.25, size.height * 0.4, size.width * 0.5, 40.0];
-    s.execute("insert.textBox", &json!({"rect": rect, "text": text}))
+    crate::rich_paste::plain(s, text)
 }
 
 fn paste_text(s: &mut Session, p: &Value) -> Result<Value> {

@@ -385,10 +385,19 @@ fn autocorrect(s: &mut Session) -> Result<()> {
 }
 
 pub(crate) fn paste_body(s: &mut Session, src: &TextBody) -> Result<Value> {
+    let src = crate::paste_inherit::prepare(s, src)?;
     let pos = edit_text(s, |body, t| {
         let (a, b) = t.ordered();
         let at = ed::delete(body, a, b);
-        let c = ed::insert_body(body, at, src);
+        let empty = body.paragraphs.get(at.0).is_none_or(|p| p.is_empty());
+        let c = ed::insert_body(body, at, &src);
+        if (empty || at.1 == 0)
+            && let (Some(dest), Some(first)) = (body.paragraphs.get_mut(at.0), src.paragraphs.first())
+        {
+            dest.level = first.level;
+            dest.props = first.props.clone();
+            dest.end_props = first.end_props.clone();
+        }
         t.anchor = c;
         t.caret = c;
         c
