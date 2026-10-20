@@ -111,6 +111,122 @@ fn tsv_and_merged_html_create_real_tables_sized_to_slide_with_one_undo() {
     }
 }
 
+fn grid_payload(rows: usize, cols: usize, html: bool) -> Value {
+    let grid: Vec<Vec<String>> = (0..rows).map(|r| (0..cols).map(|c| format!("R{r}C{c}")).collect()).collect();
+    if html {
+        let rows: String = grid
+            .iter()
+            .map(|row| format!("<tr>{}</tr>", row.iter().map(|cell| format!("<td>{cell}</td>")).collect::<String>()))
+            .collect();
+        json!({"html": format!("<table>{rows}</table>")})
+    } else {
+        json!({"text": grid.iter().map(|row| row.join("\t")).collect::<Vec<_>>().join("\n")})
+    }
+}
+
+fn assert_pasted_table_size(s: &Session, rows: usize, cols: usize, fits_height: bool) {
+    let state = s.doc().unwrap();
+    let shape = state.shape(state.selection.shapes[0]).unwrap();
+    let table = table(s, shape.id);
+    let rect = shape.xfrm.unwrap();
+    let size = state.doc.slide_size;
+    assert_eq!((table.n_rows(), table.n_cols()), (rows, cols));
+    assert!(rect.x >= size.width * 0.1);
+    assert!(rect.y >= size.height * 0.1);
+    assert!(rect.x + rect.w <= size.width * 0.9);
+    assert_eq!(rect.w, table.width());
+    assert_eq!(rect.h, table.height());
+    let drawn_height: f64 = crate::cmd::table_drawn_heights(&state.doc, &state.selection, table).iter().sum();
+    assert!((drawn_height - rect.h).abs() < 1e-6);
+    if fits_height {
+        assert!(rect.y + rect.h <= size.height * 0.9);
+    } else {
+        assert!(rect.y + rect.h > size.height);
+    }
+    for para in table.rows.iter().flat_map(|row| &row.cells).flat_map(|cell| &cell.text.paragraphs) {
+        for props in std::iter::once(&para.end_props).chain(para.runs.iter().map(|run| &run.props)) {
+            assert!(props.size.unwrap() >= 8.0);
+        }
+    }
+}
+
+#[test]
+fn pasted_three_by_three_table_keeps_default_font_and_row_height() {
+    for html in [false, true] {
+        let mut s = Session::with_new();
+        let before = snapshot(&s);
+        s.execute("edit.paste", &grid_payload(3, 3, html)).unwrap();
+        assert_pasted_table_size(&s, 3, 3, true);
+        let table = table(&s, s.doc().unwrap().selection.shapes[0]);
+        for row in &table.rows {
+            assert_eq!(row.height, 30.0);
+            for cell in &row.cells {
+                assert_eq!(cell.text.paragraphs[0].runs[0].props.size, Some(18.0));
+            }
+        }
+        undo_once(&mut s, before);
+    }
+}
+
+#[test]
+fn pasted_thirty_by_ten_table_fits_slide_at_readable_font_size() {
+    for html in [false, true] {
+        let mut s = Session::with_new();
+        let before = snapshot(&s);
+        s.execute("edit.paste", &grid_payload(30, 10, html)).unwrap();
+        assert_pasted_table_size(&s, 30, 10, true);
+        assert!(table(&s, s.doc().unwrap().selection.shapes[0]).cell(0, 0).unwrap().text.paragraphs[0].runs[0].props.size.unwrap() < 18.0);
+        undo_once(&mut s, before);
+    }
+}
+
+#[test]
+fn pasted_five_hundred_row_table_overflows_at_eight_points_from_margin() {
+    for html in [false, true] {
+        let mut s = Session::with_new();
+        let before = snapshot(&s);
+        s.execute("edit.paste", &grid_payload(500, 3, html)).unwrap();
+        assert_pasted_table_size(&s, 500, 3, false);
+        let state = s.doc().unwrap();
+        let shape = state.shape(state.selection.shapes[0]).unwrap();
+        let rect = shape.xfrm.unwrap();
+        assert_eq!(rect.x, state.doc.slide_size.width * 0.1);
+        assert_eq!(rect.y, state.doc.slide_size.height * 0.1);
+        for cell in table(&s, shape.id).rows.iter().flat_map(|row| &row.cells) {
+            assert_eq!(cell.text.paragraphs[0].runs[0].props.size, Some(8.0));
+        }
+        undo_once(&mut s, before);
+    }
+}
+
+#[test]
+fn pasted_table_uses_layout_body_bounds_below_title() {
+    for html in [false, true] {
+        let mut s = Session::with_new();
+        s.execute("slide.new", &json!({"layout": "titleAndContent"})).unwrap();
+        let state = s.doc().unwrap();
+        let slide = state.current_slide().unwrap();
+        let (master, Some(layout)) = state.doc.master_for(slide).unwrap() else { panic!("expected layout") };
+        let ctx = deckcraft_model::resolve::Ctx::for_layout(&state.doc, master, layout);
+        let body = layout.shapes.iter().find(|shape| shape.ph_type() == Some(deckcraft_model::PhType::Obj)).unwrap();
+        let body = deckcraft_model::resolve::xfrm(&ctx, body);
+        let title = layout.shapes.iter().find(|shape| shape.ph_type().is_some_and(|kind| kind.is_title())).unwrap();
+        let title = deckcraft_model::resolve::xfrm(&ctx, title);
+        let size = state.doc.slide_size;
+        let before = snapshot(&s);
+        s.execute("edit.paste", &grid_payload(30, 10, html)).unwrap();
+        assert_pasted_table_size(&s, 30, 10, true);
+        let state = s.doc().unwrap();
+        let rect = state.shape(state.selection.shapes[0]).unwrap().xfrm.unwrap();
+        assert_eq!(rect.x, body.x.max(size.width * 0.1));
+        assert_eq!(rect.y, body.y.max(size.height * 0.1));
+        assert!(rect.y >= title.y + title.h);
+        assert!(rect.x + rect.w <= body.x + body.w);
+        assert!(rect.y + rect.h <= body.y + body.h);
+        undo_once(&mut s, before);
+    }
+}
+
 #[test]
 fn selected_table_paste_starts_at_selected_cell_and_extends_once() {
     let mut s = Session::with_new();

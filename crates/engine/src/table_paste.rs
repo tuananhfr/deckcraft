@@ -2,7 +2,6 @@
 
 use std::collections::BTreeMap;
 
-use deckcraft_geom::Xfrm;
 use deckcraft_model::table::Row;
 use deckcraft_model::{Cell, Shape, ShapeId, ShapeKind, Table};
 use serde_json::{Value, json};
@@ -10,6 +9,8 @@ use serde_json::{Value, json};
 use crate::{Result, Session, html_tokens::MAX_INPUT};
 
 pub(crate) const MAX_CELLS: usize = 20_000;
+
+mod sizing;
 
 pub(crate) fn from_rows(rows: Vec<Vec<Cell>>) -> Option<Table> {
     let mut grid = BTreeMap::new();
@@ -195,17 +196,8 @@ pub(crate) fn paste(s: &mut Session, mut source: Table) -> Result<Value> {
             Ok(json!({"id": id}))
         });
     }
-    let size = s.doc()?.doc.slide_size;
-    let w = size.width * 0.8;
-    let h = (30.0 * source.n_rows() as f64).min(size.height * 0.8);
-    let cw = w / source.n_cols().max(1) as f64;
-    let rh = h / source.n_rows().max(1) as f64;
-    source.cols.fill(cw);
-    for row in &mut source.rows {
-        row.height = rh;
-    }
-    let shape =
-        Shape { xfrm: Some(Xfrm::new(size.width * 0.1, (size.height - h) / 2.0, w, h)), kind: ShapeKind::Table(source), ..Default::default() };
+    let rect = sizing::fit(s, &mut source)?;
+    let shape = Shape { xfrm: Some(rect), kind: ShapeKind::Table(source), ..Default::default() };
     let id = crate::cmd::insert::add_shape(s, shape, true)?;
     s.select(|_, sel| sel.cells = None)?;
     Ok(json!({"id": id}))
