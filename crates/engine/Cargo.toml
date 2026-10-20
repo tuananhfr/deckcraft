@@ -25,4 +25,5 @@ serde_json = { workspace = true }
 i_overlay = { workspace = true }
 thiserror = { workspace = true }
 log = { workspace = true }
+unicode-normalization = { workspace = true }
 image = { workspace = true }

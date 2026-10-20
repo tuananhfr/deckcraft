@@ -8,6 +8,7 @@ use deckcraft_model::text::{Paragraph, RunKind, TextBody};
 use deckcraft_model::{Presentation, Shape, ShapeId, ShapeKind, Slide};
 use serde_json::{Value, json};
 
+use super::textmatch::Folded;
 use super::*;
 use crate::{DocState, Result, Session, Target, TextSel};
 
@@ -79,50 +80,18 @@ impl Query {
     fn from_params(p: &Value, cmd: &str) -> Result<Query> {
         let text = str_param(p, "text").filter(|t| !t.is_empty()).ok_or_else(|| bad(cmd, format!("missing `text`: {QUERY}")))?;
         let match_case = bool_or(p, "matchCase", false);
-        let needle = text.chars().map(|c| if match_case { c } else { fold(c) }).collect();
+        let needle = Folded::new(text.chars(), match_case).chars;
         Ok(Query { needle, match_case, whole_words: bool_or(p, "wholeWords", false) })
     }
 
-    /// Char ranges of the matches in a paragraph, left to right and not overlapping. A match lies
-    /// in text runs only: fields (slide numbers, dates) and line breaks are not text to replace.
+    /// Char ranges of the matches in a paragraph, left to right and not overlapping, NFC and NFD
+    /// alike ([`Folded`]). A match lies in text runs only: fields (slide numbers, dates) and line
+    /// breaks are not text to replace.
     fn matches(&self, para: &Paragraph) -> Vec<(usize, usize)> {
-        let mut chars = Vec::new();
-        let mut in_text = Vec::new();
-        for r in &para.runs {
-            for c in r.content().chars() {
-                chars.push(if self.match_case { c } else { fold(c) });
-                in_text.push(r.kind == RunKind::Text);
-            }
-        }
-        let n = self.needle.len();
-        let mut out = Vec::new();
-        let mut i = 0;
-        while n > 0 && i + n <= chars.len() {
-            let hit = chars.get(i..i + n) == Some(self.needle.as_slice())
-                && in_text.get(i..i + n).is_some_and(|t| t.iter().all(|x| *x))
-                && (!self.whole_words || (!word_char_at(&chars, i.checked_sub(1)) && !word_char_at(&chars, Some(i + n))));
-            if hit {
-                out.push((i, i + n));
-                i += n;
-            } else {
-                i += 1;
-            }
-        }
-        out
+        let in_text: Vec<bool> = para.runs.iter().flat_map(|r| r.content().chars().map(|_| r.kind == RunKind::Text)).collect();
+        let hay = Folded::new(para.runs.iter().flat_map(|r| r.content().chars()), self.match_case);
+        hay.matches(&self.needle, self.whole_words, |a, b| in_text.get(a..b).is_some_and(|t| t.iter().all(|x| *x)))
     }
-}
-
-/// Lower case as one char, so offsets stay those of the original text (`İ` folds to itself).
-fn fold(c: char) -> char {
-    let mut l = c.to_lowercase();
-    match (l.next(), l.next()) {
-        (Some(x), None) => x,
-        _ => c,
-    }
-}
-
-fn word_char_at(chars: &[char], i: Option<usize>) -> bool {
-    i.and_then(|i| chars.get(i)).is_some_and(|c| c.is_alphanumeric() || *c == '_')
 }
 
 /// A slide's text bodies in search order: shapes back to front (into groups, table cells row by
@@ -461,5 +430,71 @@ mod tests {
         assert_eq!(body_text(&s, 0, title), "Beta alpha beta");
         assert_eq!(s.doc().unwrap().doc.slides[1].notes.text(), "notes beta");
         assert_eq!(s.execute("edit.replaceAll", &json!({"text": "gamma", "with": "x"})).unwrap()["count"], 0);
+    }
+
+    /// Slide 1: the title "Nhà ở, nhà đẹp" decomposed (NFD, as some apps paste it). Slide 2: a 1×2
+    /// table ["nhà" precomposed (NFC), "nha"] and the notes "ghi chú nhà" in NFD.
+    fn vietnamese_deck() -> (Session, u32, u32) {
+        let mut s = Session::with_new();
+        s.prefs.autocorrect = false;
+        let title = s.doc().unwrap().current_slide().unwrap().shapes[0].id.0;
+        s.execute("text.set", &json!({"id": title, "text": "Nha\u{0300} o\u{031B}\u{0309}, nha\u{0300} đe\u{0323}p"})).unwrap();
+        s.execute("slide.new", &json!({"layout": "blank"})).unwrap();
+        let table = s.execute("insert.table", &json!({"rows": 1, "cols": 2})).unwrap()["id"].as_u64().unwrap() as u32;
+        s.execute("text.set", &json!({"id": table, "cell": [0, 0], "text": "nh\u{00E0}"})).unwrap();
+        s.execute("text.set", &json!({"id": table, "cell": [0, 1], "text": "nha"})).unwrap();
+        s.execute("slide.notes", &json!({"text": "ghi chú nha\u{0300}"})).unwrap();
+        s.execute("slide.go", &json!({"index": 0})).unwrap();
+        (s, title, table)
+    }
+
+    #[test]
+    fn nfc_and_nfd_find_each_other_in_shapes_cells_and_notes() {
+        for needle in ["nh\u{00E0}", "nha\u{0300}", "NH\u{00C0}"] {
+            let (mut s, title, table) = vietnamese_deck();
+            let q = json!({"text": needle});
+            let seen: Vec<_> = (0..5).map(|_| found(&s.execute("edit.find", &q).unwrap())).collect();
+            // Ranges are in the stored text's chars: "Nhà" in NFD is 4 of them.
+            let at = |slide, id: Value, cell: Value, notes, r: [usize; 2]| (slide, id, cell, notes, json!(r));
+            assert_eq!(
+                seen,
+                vec![
+                    at(0, json!(title), Value::Null, false, [0, 4]),
+                    at(0, json!(title), Value::Null, false, [10, 14]),
+                    at(1, json!(table), json!([0, 0]), false, [0, 3]),
+                    at(1, Value::Null, Value::Null, true, [8, 12]),
+                    at(0, json!(title), Value::Null, false, [0, 4]),
+                ],
+                "{needle:?}"
+            );
+            assert_eq!(s.execute("edit.find", &q).unwrap()["count"], 4);
+        }
+        let (mut s, ..) = vietnamese_deck();
+        assert_eq!(s.execute("edit.find", &json!({"text": "Nh\u{00E0}", "matchCase": true})).unwrap()["count"], 1);
+        let r = s.execute("edit.find", &json!({"text": "nha"})).unwrap();
+        assert_eq!((r["count"].clone(), r["cell"].clone()), (json!(1), json!([0, 1])), "no accent matches only \"nha\"");
+        assert_eq!(s.execute("edit.find", &json!({"text": "nha", "wholeWords": true})).unwrap()["count"], 1);
+        assert_eq!(s.execute("edit.find", &json!({"text": "đẹp", "wholeWords": true})).unwrap()["count"], 1);
+    }
+
+    #[test]
+    fn replace_takes_the_whole_decomposed_letter() {
+        let (mut s, title, table) = vietnamese_deck();
+        let q = json!({"text": "\u{1EDF}", "with": "\u{01A1}"});
+        assert_eq!(s.execute("edit.replace", &q).unwrap()["range"], json!([5, 8]), "o, horn, hook above");
+        let r = s.execute("edit.replace", &q).unwrap();
+        assert_eq!((r["replaced"].clone(), r["found"].clone()), (json!(true), json!(false)));
+        assert_eq!(body_text(&s, 0, title), "Nha\u{0300} \u{01A1}, nha\u{0300} đe\u{0323}p");
+
+        let r = s.execute("edit.replaceAll", &json!({"text": "nh\u{00E0}", "with": "NH\u{00C0}"})).unwrap();
+        assert_eq!(r["count"], 4);
+        assert_eq!(body_text(&s, 0, title), "NH\u{00C0} \u{01A1}, NH\u{00C0} đe\u{0323}p", "no mark is left behind");
+        let sl = s.doc().unwrap().doc.slides[1].clone();
+        let ShapeKind::Table(t) = &deckcraft_model::find_shape(&sl.shapes, ShapeId(table)).unwrap().kind else { panic!("not a table") };
+        assert_eq!((t.cell(0, 0).unwrap().text.text(), t.cell(0, 1).unwrap().text.text()), ("NH\u{00C0}".into(), "nha".into()));
+        assert_eq!(sl.notes.text(), "ghi chú NH\u{00C0}");
+        s.execute("edit.undo", &json!({})).unwrap();
+        assert_eq!(body_text(&s, 0, title), "Nha\u{0300} \u{01A1}, nha\u{0300} đe\u{0323}p");
+        assert_eq!(s.doc().unwrap().doc.slides[1].notes.text(), "ghi chú nha\u{0300}");
     }
 }

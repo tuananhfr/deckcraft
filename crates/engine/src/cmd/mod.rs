@@ -17,6 +17,7 @@ pub mod shape;
 pub mod slide;
 pub mod table;
 pub mod text;
+mod textmatch;
 pub mod transition;
 
 use deckcraft_geom::Xfrm;
