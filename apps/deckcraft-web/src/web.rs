@@ -10,6 +10,7 @@ use wasm_bindgen::JsCast as _;
 
 use crate::clipboard::ClipboardBridge;
 use crate::draft_bridge::DraftBridge;
+use crate::show_fullscreen::FullscreenBridge;
 
 const PRESENTATION_EXTS: &[&str] = &["deckcraft", "pptx", "potx", "ppsx", "txt", "md"];
 const PICTURE_EXTS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp", "bmp", "tif", "tiff"];
@@ -49,7 +50,12 @@ pub fn start() {
                     }
                     let inbox: Inbox = Inbox::default();
                     let clipboard = ClipboardBridge::install(cc.egui_ctx.clone()).ok();
+                    let fullscreen = FullscreenBridge::install(cc.egui_ctx.clone()).ok();
                     let mut app = SlideApp::new(Session::new(), services(inbox.clone(), cc.egui_ctx.clone(), clipboard.clone(), dirty.clone()));
+                    app.services.has_touch = web_sys::window().is_some_and(|w| w.navigator().max_touch_points() > 0);
+                    if let Some(bridge) = fullscreen.clone() {
+                        app.services.show_fullscreen = Some(Box::new(move |showing| bridge.set_showing(showing)));
+                    }
                     app.ui.language = crate::language::initial();
                     if clipboard.is_none() {
                         app.note_clipboard(deckcraft_ui_egui::clipboard::ClipboardNotice::ReadDenied);
@@ -68,7 +74,7 @@ pub fn start() {
                     if q.contains("show") {
                         app.start_show(0, false);
                     }
-                    Ok(Box::new(WebShell { app, inbox, dirty, drafts: DraftBridge::new(), language, clipboard }))
+                    Ok(Box::new(WebShell { app, inbox, dirty, drafts: DraftBridge::new(), language, clipboard, fullscreen }))
                 }),
             )
             .await;
@@ -96,10 +102,14 @@ struct WebShell {
     /// The interface language last remembered, to save it only when it changes.
     language: String,
     clipboard: Option<ClipboardBridge>,
+    fullscreen: Option<FullscreenBridge>,
 }
 
 impl eframe::App for WebShell {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if self.fullscreen.as_ref().is_some_and(FullscreenBridge::take_end_show) {
+            self.app.end_show();
+        }
         let dropped = ctx.input_mut(|i| std::mem::take(&mut i.raw.dropped_files));
         for f in dropped {
             let inbox = self.inbox.clone();
@@ -116,6 +126,7 @@ impl eframe::App for WebShell {
             });
         }
         self.app.logic(ctx);
+        self.sync_fullscreen();
         if let Some(clipboard) = &self.clipboard {
             if let Some(notice) = clipboard.take_notice() {
                 self.app.note_clipboard(notice);
@@ -140,9 +151,18 @@ impl eframe::App for WebShell {
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.app.ui(ui);
+        self.sync_fullscreen();
         // After `ui`, where typing edits the presentation, so the guard is never a frame behind.
         self.dirty.set(self.app.has_unsaved_changes());
         self.drafts.after_frame(&self.app, ui.ctx());
+    }
+}
+
+impl WebShell {
+    fn sync_fullscreen(&self) {
+        if let Some(fullscreen) = &self.fullscreen {
+            fullscreen.set_showing(self.app.show.as_ref().is_some_and(|show| !show.reading));
+        }
     }
 }
 

@@ -30,6 +30,8 @@ mod draft_bridge;
 mod language;
 #[cfg(any(target_arch = "wasm32", test))]
 mod save_errors;
+#[cfg(any(target_arch = "wasm32", test))]
+mod show_fullscreen;
 #[cfg(target_arch = "wasm32")]
 mod web;
 

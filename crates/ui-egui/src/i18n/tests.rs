@@ -20,6 +20,15 @@ fn vietnamese_is_registered_and_english_is_the_fallback() {
 }
 
 #[test]
+fn slide_show_end_and_touch_exit_have_vietnamese_labels() {
+    let vi = Lang::from_code("vi").unwrap();
+    assert_eq!(tr(vi, "End"), "Kết thúc trình chiếu");
+    assert_eq!(tr(vi, "End of slide show"), "Kết thúc trình chiếu");
+    assert_eq!(tr(vi, "End of slide show, click to exit."), "Kết thúc trình chiếu, bấm để thoát.");
+    assert_eq!(tr(vi, "Exit slide show"), "Thoát trình chiếu");
+}
+
+#[test]
 fn fmt_fills_placeholders_once() {
     assert_eq!(fmt("Slide {n} of {total}", &[("n", "2"), ("total", "{n}")]), "Slide 2 of {n}");
     assert_eq!(fmt("{missing} stays", &[]), "{missing} stays");

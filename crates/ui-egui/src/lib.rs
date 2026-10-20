@@ -33,6 +33,8 @@ pub mod save_state;
 pub mod selpane;
 pub mod shortcuts;
 pub mod show;
+mod show_lifecycle;
+mod show_touch;
 pub mod sorter;
 pub mod status;
 pub mod status_fit;
@@ -99,6 +101,10 @@ pub struct Services {
     pub save_file: Option<SaveFileFn>,
     /// The last open presentation was explicitly closed.
     pub editor_closed: Option<Box<dyn FnMut()>>,
+    /// Fullscreen requests must run synchronously with the gesture starting the show.
+    pub show_fullscreen: Option<Box<dyn FnMut(bool)>>,
+    /// Touch capability reported by the host before the first touch event.
+    pub has_touch: bool,
     pub inbox: Option<Inbox>,
     /// Image on the system clipboard (PNG bytes), when the host can read one.
     pub clipboard_image: Option<Box<dyn FnMut() -> Option<Vec<u8>>>>,
@@ -632,11 +638,8 @@ impl SlideApp {
                 let from = p.get("from").and_then(Value::as_u64).map(|v| v as usize).unwrap_or(0);
                 self.start_show(from, false);
             }
-            "show.presenter" => self.ui.presenter_view = self.flag(p, self.ui.presenter_view),
-            "show.end" => {
-                self.show = None;
-                self.media.stop_owned(media::Owner::Show);
-            }
+            "show.presenter" => self.presenter_view(p),
+            "show.end" => self.end_show(),
             "app.home" => {
                 let on = self.flag(p, self.backstage_open());
                 if on {
@@ -703,15 +706,6 @@ impl SlideApp {
             _ => return Err(format!("unknown UI command `{id}`")),
         }
         Ok(Value::Null)
-    }
-
-    pub fn start_show(&mut self, from: usize, reading: bool) {
-        self.media.stop_owned(media::Owner::Editor);
-        // A phone has one screen: Presenter View would cover the show.
-        let presenter = self.ui.presenter_view && !reading && !self.layout.is_narrow();
-        if let Some(d) = self.session.active() {
-            self.show = Some(show::Show::new(&d.doc, from, reading, presenter));
-        }
     }
 
     fn pick_and_open(&mut self) {
@@ -1036,7 +1030,7 @@ impl SlideApp {
         // Closing the window with unsaved changes asks first, once for all of them.
         if ctx.input(|i| i.viewport().close_requested()) && !self.quit_confirmed && self.session.documents().iter().any(|d| d.is_dirty()) {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-            self.show = None;
+            self.end_show();
             if self.dialog.as_ref().is_none_or(|d| d.id != close_many::DIALOG) {
                 let all = self.session.documents().iter().map(|d| d.uid).collect();
                 self.close_documents(all, close_many::After::Quit);

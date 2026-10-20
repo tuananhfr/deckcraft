@@ -346,6 +346,63 @@ fn show_slide(h: &Harness<'_, SlideApp>) -> usize {
 }
 
 #[test]
+fn the_touch_show_exit_is_a_fixed_44_point_target_and_ends_without_advancing() {
+    let mut h = show_harness();
+    h.state_mut().ui.language = "vi".into();
+    assert!(h.query_by_label("Exit slide show").is_none());
+    frame(&mut h, vec![touch(TouchPhase::Start, pos2(180.0, 420.0))]);
+    frame(&mut h, vec![touch(TouchPhase::End, pos2(180.0, 420.0))]);
+    let rect = h.get_by_label("Thoát trình chiếu").rect();
+    assert_eq!(rect.size(), vec2(44.0, 44.0));
+    assert!(rect.right() >= 370.0 && rect.right() <= 390.0);
+    assert!(rect.top() >= 0.0 && rect.top() <= 24.0);
+    h.input_mut().time = Some(10.0);
+    h.run_steps(1);
+    assert_eq!(h.get_by_label("Thoát trình chiếu").rect(), rect, "the exit stays when the navigation bar fades");
+    tap(&mut h, rect.center());
+    assert!(h.state().show.is_none());
+    assert_eq!(h.state().session.active().unwrap().selection.slide, 0, "the exit tap must not advance a slide");
+}
+
+#[test]
+fn touch_capability_shows_the_exit_before_the_first_touch_and_on_the_end_screen() {
+    let mut h = show_harness();
+    h.state_mut().services.has_touch = true;
+    h.state_mut().show.as_mut().unwrap().ended = true;
+    h.run_steps(2);
+    assert!(!h.state().touch.active);
+    h.get_by_label("Exit slide show").click();
+    h.run_steps(2);
+    assert!(h.state().show.is_none());
+}
+
+#[test]
+fn a_wide_touch_show_also_has_the_exit_and_notifies_the_host() {
+    let mut h = show_harness();
+    let stopped = std::rc::Rc::new(std::cell::Cell::new(false));
+    let output = stopped.clone();
+    h.state_mut().services.show_fullscreen = Some(Box::new(move |on| output.set(!on)));
+    h.state_mut().services.has_touch = true;
+    h.set_size(vec2(1366.0, 768.0));
+    h.run_steps(2);
+    let rect = h.get_by_label("Exit slide show").rect();
+    assert_eq!(rect.size(), vec2(44.0, 44.0));
+    assert!(rect.right() >= 1346.0 && rect.right() <= 1366.0);
+    tap(&mut h, rect.center());
+    assert!(h.state().show.is_none());
+    assert!(stopped.get());
+}
+
+#[test]
+fn mouse_only_shows_keep_their_existing_escape_behavior() {
+    let mut h = show_harness();
+    assert!(h.query_by_label("Exit slide show").is_none());
+    h.key_press(egui::Key::Escape);
+    h.run_steps(2);
+    assert!(h.state().show.is_none());
+}
+
+#[test]
 fn a_swipe_in_the_slide_show_changes_slides() {
     let mut h = show_harness();
     assert_eq!(show_slide(&h), 0);

@@ -1900,9 +1900,9 @@ fn slide_show(app: &mut SlideApp, ui: &mut Ui) {
             let i = app.session.active().map(|d| d.selection.slide).unwrap_or(0);
             app.start_show(i, false);
         }
-        let on = app.ui.presenter_view;
+        let on = if cfg!(target_arch = "wasm32") { app.show.as_ref().is_some_and(|show| show.presenter) } else { app.ui.presenter_view };
         if big_button_ex(ui, Icon::PresenterView, "Presenter\nView", true, false, on).0.clicked() {
-            app.ui.presenter_view = !on;
+            run(app, "show.presenter", json!({}));
         }
         big(app, ui, Icon::CustomShow, "Custom\nShow", "app.dialog", json!({"id": "customShow"}));
     });

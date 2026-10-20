@@ -249,7 +249,7 @@ fn part_textures(ctx: &egui::Context, doc: &Presentation, from: Option<usize>, t
 pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
     let ctx = ui.ctx().clone();
     let Some(doc) = app.session.active().map(|d| d.doc.clone()) else {
-        app.show = None;
+        app.end_show();
         return;
     };
     let now = ctx.input(|i| i.time);
@@ -260,7 +260,7 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
         show.step_start = now;
         show.show_start = now;
         show.last_move = now;
-        if !show.reading {
+        if !show.reading && !cfg!(target_arch = "wasm32") {
             ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(true));
         }
         show.after_enter(&doc, now);
@@ -270,14 +270,22 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
     // on the slide.
     let menu_id = ui.id().with("show_menu");
     let menu_open = egui::Popup::is_id_open(&ctx, menu_id);
+    let touch_exit = crate::show_touch::exit_rect(ui, app.touch.active || app.services.has_touch || ctx.input(|i| i.has_touch_screen()));
+    let exit_hit = ctx.input(|i| touch_exit.is_some_and(|r| i.pointer.interact_pos().is_some_and(|p| r.contains(p))));
     let (keys, clicked, secondary, moved, swipe) = ctx.input(|i| {
         let keys: Vec<(egui::Key, egui::Modifiers)> = i
             .events
             .iter()
             .filter_map(|e| if let egui::Event::Key { key, pressed: true, modifiers, .. } = e { Some((*key, *modifiers)) } else { None })
             .collect();
-        let swipe = show.swipe.feed(&i.events).filter(|_| app.touch.active && !show.pen && !menu_open);
-        (keys, i.pointer.primary_clicked() && !menu_open, i.pointer.secondary_clicked() && !menu_open, i.pointer.delta().length() > 0.0, swipe)
+        let swipe = show.swipe.feed(&i.events).filter(|_| app.touch.active && !show.pen && !menu_open && !exit_hit);
+        (
+            keys,
+            i.pointer.primary_clicked() && !menu_open && !exit_hit,
+            i.pointer.secondary_clicked() && !menu_open && !exit_hit,
+            i.pointer.delta().length() > 0.0,
+            swipe,
+        )
     });
     if moved {
         show.last_move = now;
@@ -585,7 +593,7 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
     }
     // Pen. Without it the slide senses clicks, for egui's long press on touch screens.
     let resp = ui.interact(full, ui.id().with("show_pen"), if show.pen { Sense::drag() } else { Sense::click() });
-    if !show_menu(&resp, menu_id, &mut show, &doc, now) {
+    if !exit_hit && !show_menu(&resp, menu_id, &mut show, &doc, now) {
         keep = false;
     }
     if show.pen {
@@ -692,11 +700,19 @@ pub fn ui(app: &mut SlideApp, ui: &mut Ui) {
     if show.presenter && !show.reading && !show.ended {
         presenter_window(&ctx, &mut show, &doc, now, &mut keep);
     }
+    if let Some(rect) = touch_exit {
+        if crate::show_touch::exit_button(ui, rect) {
+            keep = false;
+        }
+        if exit_hit {
+            ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+    }
     if keep {
         app.show = Some(show);
     } else {
-        app.media.stop_owned(crate::media::Owner::Show);
-        if !show.reading {
+        app.end_show();
+        if !show.reading && !cfg!(target_arch = "wasm32") {
             ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(false));
         }
         if show.rehearse {

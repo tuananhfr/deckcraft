@@ -1,5 +1,8 @@
 # ERPCons changes
 
+- Slide show fullscreen (web): request browser fullscreen when the show starts, continue windowed if refused, release fullscreen on every show exit, and end the show when browser fullscreen is left; Presenter View opens only through its explicit command.
+- Touch slide show exit and translation (both): a persistent top-right 44-point close target ends the show with the Vietnamese tooltip "Thoát trình chiếu"; the End control reads "Kết thúc trình chiếu" in Vietnamese.
+
 - Close waits for Save (web): closing a presentation waits for the pending browser write; cancelled or failed saves and edits made during saving keep it open, and browser save errors use translated messages without raw exception details.
 - Narrow-screen close button (both): the title bar keeps a document × reachable at 390 points, with the translated Close document tooltip and the existing Save / Don't Save / Cancel flow.
 - Editor closed hook (web): after the last open presentation is explicitly closed, call the optional ERP shell's no-argument `window.erpEditorClosed` once; standalone pages and desktop need no hook.
