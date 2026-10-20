@@ -217,6 +217,109 @@ fn the_hit_tolerance_grows_for_a_finger() {
     assert!(sh.xfrm.unwrap().w < w0 - 30.0, "the finger narrowed the band: {} from {w0}", sh.xfrm.unwrap().w);
 }
 
+/// The sample deck at twice its size, run at 60 frames a second so egui measures a finger's speed.
+fn fast_canvas() -> Harness<'static, SlideApp> {
+    let mut session = Session::new();
+    deckcraft_engine::sample::open_sample(&mut session).unwrap();
+    let mut app = SlideApp::new(session, Services::default());
+    app.ui.zoom = Some(2.0);
+    let mut h = Harness::builder().with_size(vec2(1200.0, 800.0)).with_step_dt(1.0 / 60.0).build_ui_state(
+        |ui, app: &mut SlideApp| {
+            app.logic(ui.ctx());
+            app.ui(ui);
+        },
+        app,
+    );
+    h.run_steps(3);
+    h
+}
+
+/// A one-finger pan on an empty spot, `by` points in four frames.
+fn quick_pan(h: &mut Harness<'_, SlideApp>, by: egui::Vec2) {
+    let from = screen(h, 40.0, 40.0);
+    finger_down(h, from);
+    for i in 1..=4 {
+        finger_move(h, from + by * (i as f32 / 4.0));
+    }
+    finger_up(h, from + by);
+}
+
+fn slide_x(h: &Harness<'_, SlideApp>) -> f32 {
+    h.state().slide_rect.unwrap().min.x
+}
+
+#[test]
+fn a_quick_pan_keeps_going_after_the_finger_lifts_and_slows_to_a_stop() {
+    let mut h = fast_canvas();
+    quick_pan(&mut h, vec2(-120.0, 0.0));
+    let lifted = slide_x(&h);
+    h.run_steps(3);
+    let early = slide_x(&h);
+    assert!(early < lifted - 20.0, "the slide keeps moving the finger's way: {lifted} -> {early}");
+    h.run_steps(240);
+    assert!(h.state().canvas_touch.fling.is_none(), "it comes to a stop");
+    let stopped = slide_x(&h);
+    h.run_steps(5);
+    assert_eq!(slide_x(&h), stopped);
+    assert!(stopped < early && selected(&h).is_empty() && !h.state().session.active().unwrap().is_dirty());
+}
+
+#[test]
+fn a_slow_pan_stops_with_the_finger() {
+    let mut h = fast_canvas();
+    let from = screen(&h, 40.0, 40.0);
+    finger_down(&mut h, from);
+    // 60 points over a second.
+    for i in 1..=60 {
+        finger_move(&mut h, from - vec2(i as f32, 0.0));
+    }
+    finger_up(&mut h, from - vec2(60.0, 0.0));
+    let lifted = slide_x(&h);
+    h.run_steps(10);
+    assert!(h.state().canvas_touch.fling.is_none());
+    assert_eq!(slide_x(&h), lifted);
+}
+
+#[test]
+fn a_new_touch_stops_a_fling() {
+    let mut h = fast_canvas();
+    quick_pan(&mut h, vec2(-120.0, 0.0));
+    h.run_steps(2);
+    assert!(h.state().canvas_touch.fling.is_some());
+    let at = screen(&h, 40.0, 40.0);
+    finger_down(&mut h, at);
+    let held = slide_x(&h);
+    h.run_steps(5);
+    assert!(h.state().canvas_touch.fling.is_none());
+    assert_eq!(slide_x(&h), held, "the slide stays under the finger");
+    finger_up(&mut h, at);
+}
+
+#[test]
+fn a_fling_stops_at_the_slides_edge() {
+    let mut h = fast_canvas();
+    // Far faster than the room left: it ends with the slide's right edge at the canvas margin.
+    quick_pan(&mut h, vec2(-300.0, 0.0));
+    h.run_steps(240);
+    assert!(h.state().canvas_touch.fling.is_none());
+    let (slide, canvas) = (h.state().slide_rect.unwrap(), h.state().canvas_rect.unwrap());
+    assert!((slide.max.x - (canvas.max.x - 28.0)).abs() < 1.0, "{slide:?} in {canvas:?}");
+}
+
+#[test]
+fn the_mouse_never_flings() {
+    let mut h = fast_canvas();
+    quick_pan(&mut h, vec2(-120.0, 0.0));
+    h.run_steps(1);
+    assert!(h.state().canvas_touch.fling.is_some());
+    h.hover_at(pos2(600.0, 400.0));
+    h.run_steps(1);
+    let x = slide_x(&h);
+    h.run_steps(5);
+    assert!(h.state().canvas_touch.fling.is_none());
+    assert_eq!(slide_x(&h), x);
+}
+
 /// A slide show on a phone: three blank slides, no Presenter View (a narrow window has none).
 fn show_harness() -> Harness<'static, SlideApp> {
     let mut session = Session::with_new();

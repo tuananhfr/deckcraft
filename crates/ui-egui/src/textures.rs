@@ -18,6 +18,8 @@ struct Key {
     master: usize,
     size: (u32, u32),
     edit: bool,
+    /// The interface language the placeholder prompts are drawn in (canvas only).
+    lang: &'static str,
     extra: u64,
     /// The pasteboard region the slide's drawing calls for (canvas only).
     want: Region,
@@ -117,11 +119,13 @@ impl Textures {
             _ => estimate,
         };
         let want = deckcraft_render::pasteboard_region(size, scale, reach, visible);
+        let lang = crate::i18n::current();
         let key = Key {
             slide: Arc::as_ptr(&slide) as usize,
             master: master.as_ref().map(|m| Arc::as_ptr(m) as usize).unwrap_or(0),
             size,
             edit,
+            lang: lang.code(),
             extra: extra ^ grayscale as u64,
             want,
         };
@@ -131,9 +135,18 @@ impl Textures {
             return Some((e.tex.clone(), e.region));
         }
         let t0 = crate::now_ms();
+        let prompt = move |s: &'static str| crate::i18n::tr(lang, s);
         let render = |region: Region| {
-            let opts =
-                RenderOpts { scale, edit, gif_times, threads: threads(), offset: region.offset(), size: Some(region.size()), ..Default::default() };
+            let opts = RenderOpts {
+                scale,
+                edit,
+                gif_times,
+                threads: threads(),
+                offset: region.offset(),
+                size: Some(region.size()),
+                prompt_text: Some(&prompt),
+                ..Default::default()
+            };
             deckcraft_render::render_slide_drawn(p, index, &opts)
         };
         let (mut img, drawn) = render(want);
@@ -181,6 +194,7 @@ impl Textures {
             master: master.as_ref().map(|m| Arc::as_ptr(m) as usize).unwrap_or(0),
             size: (width_px, h),
             edit: false,
+            lang: "",
             extra: 0,
             want: Region::slide(width_px, h),
         };

@@ -75,8 +75,22 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
     let (wheel, zoom_delta, pinch_pos, two_fingers) =
         ui.input(|i| (i.smooth_scroll_delta, i.zoom_delta(), i.pointer.hover_pos(), i.multi_touch().is_some()));
     // A finger dragging away from the selection pans (when the slide is larger than the window).
-    if app.touch.active && app.canvas_touch.panning() && resp.dragged() && !two_fingers {
-        offset -= resp.drag_delta();
+    if app.touch.active && app.canvas_touch.panning() && !two_fingers {
+        if resp.dragged() {
+            offset -= resp.drag_delta();
+        }
+        if resp.drag_stopped() {
+            app.canvas_touch.fling = crate::touch::Fling::from_release(ui.input(|i| i.pointer.velocity())).map(|f| (scroll_id, f));
+        }
+    }
+    // A quick pan keeps going after the finger lifts; a new touch or the mouse stops it.
+    if let Some((id, mut fling)) = app.canvas_touch.fling {
+        let stopped = id != scroll_id || !app.touch.active || ui.input(|i| i.pointer.any_down());
+        let moving = !stopped && fling.scroll(&mut offset, overflow, ui.input(|i| i.stable_dt));
+        app.canvas_touch.fling = moving.then_some((id, fling));
+        if moving {
+            ui.ctx().request_repaint();
+        }
     }
     if resp.hovered() {
         if (zoom_delta - 1.0).abs() > 1e-3 {

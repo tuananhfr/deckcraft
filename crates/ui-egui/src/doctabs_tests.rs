@@ -156,7 +156,7 @@ fn the_limit_holds_on_every_way_to_open() {
     assert!(h.state_mut().run("file.new", json!({})).is_err());
     assert_eq!(toast(&h), Some(msg.clone()));
     h.run_steps(2);
-    assert!(h.query_by_label_contains("Chỉ mở được tối đa 10 tài liệu.").is_some(), "said in Vietnamese");
+    assert!(h.query_all_by_label_contains("Chỉ mở được tối đa 10 tài liệu.").next().is_some(), "said in Vietnamese");
     h.state_mut().toast = None;
 
     // Ctrl+N.

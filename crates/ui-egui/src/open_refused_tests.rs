@@ -39,7 +39,7 @@ fn a_zip_bomb_shows_the_translated_reason_and_opens_nothing() {
     h.state_mut().open_or_insert_bytes("Bomb.deckcraft", &bomb());
     assert_eq!(toast(&h), Some(msg.clone()));
     h.run_steps(2);
-    assert!(h.query_by_label_contains(VI).is_some(), "said in Vietnamese");
+    assert!(h.query_all_by_label_contains(VI).next().is_some(), "said in Vietnamese");
     h.state_mut().toast = None;
 
     // A desktop path.

@@ -101,7 +101,7 @@ fn the_desktop_saves_its_own_ribbon_choice_while_narrow() {
 }
 
 /// The rects of the nodes labelled `labels` (in `lang`) inside `band`.
-fn rects_in(h: &Harness<'_, SlideApp>, lang: Lang, band: Rect, labels: &[&str]) -> Vec<(String, Rect)> {
+pub(crate) fn rects_in(h: &Harness<'_, SlideApp>, lang: Lang, band: Rect, labels: &[&str]) -> Vec<(String, Rect)> {
     let mut out = vec![];
     for l in labels {
         let shown = i18n::tr(lang, l);
@@ -114,7 +114,7 @@ fn rects_in(h: &Harness<'_, SlideApp>, lang: Lang, band: Rect, labels: &[&str]) 
     out
 }
 
-fn assert_apart(what: &str, width: f32, rects: &[(String, Rect)]) {
+pub(crate) fn assert_apart(what: &str, width: f32, rects: &[(String, Rect)]) {
     for (i, (a, ra)) in rects.iter().enumerate() {
         assert!(ra.min.x >= -0.5 && ra.max.x <= width + 0.5, "{what} at {width}: {a} leaves the window: {ra:?}");
         for (b, rb) in &rects[i + 1..] {

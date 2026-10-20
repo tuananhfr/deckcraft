@@ -166,6 +166,23 @@ fn placeholder_prompts_only_in_edit_view() {
 }
 
 #[test]
+fn placeholder_prompts_draw_in_the_interface_language() {
+    let p = Presentation::default();
+    let asked = std::cell::RefCell::new(vec![]);
+    let vi = |s: &'static str| {
+        asked.borrow_mut().push(s);
+        if s == "Click to add title" { "Bấm để thêm tiêu đề" } else { s }
+    };
+    let english = render_slide(&p, 0, &RenderOpts { scale: 0.5, edit: true, ..Default::default() });
+    let shown = render_slide(&p, 0, &RenderOpts { scale: 0.5, edit: true, prompt_text: Some(&vi), ..Default::default() });
+    assert!(asked.borrow().contains(&"Click to add title"), "{:?}", asked.borrow());
+    assert_ne!(english.pixels, shown.pixels, "the title prompt reads differently");
+    asked.borrow_mut().clear();
+    render_slide(&p, 0, &RenderOpts { scale: 0.5, prompt_text: Some(&vi), ..Default::default() });
+    assert!(asked.borrow().is_empty(), "the slide show draws no prompts");
+}
+
+#[test]
 fn png_encodes() {
     let p = Presentation::default();
     let img = render_slide(&p, 0, &RenderOpts { scale: 0.1, ..Default::default() });

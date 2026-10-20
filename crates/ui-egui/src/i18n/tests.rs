@@ -118,6 +118,16 @@ fn every_tab_and_command_is_translated() {
     assert!(missing.is_empty(), "untranslated: {missing:#?}");
 }
 
+/// The prompts the canvas draws in empty placeholders ("Click to add title"…) are translated.
+#[test]
+fn every_placeholder_prompt_is_translated() {
+    use deckcraft_model::PhType::*;
+    let vi = Lang::from_code("vi").unwrap();
+    let kinds = [Title, CtrTitle, SubTitle, Body, Obj, Chart, Table, ClipArt, Diagram, Media, Picture, Date, Footer, SlideNum, Header, SlideImage];
+    let missing: Vec<&str> = kinds.iter().filter(|k| !k.is_footer_kind()).map(|k| k.prompt()).filter(|s| !s.is_empty() && !has(vi, s)).collect();
+    assert!(missing.is_empty(), "untranslated: {missing:#?}");
+}
+
 #[test]
 fn the_language_setting_is_a_ui_command_and_persists() {
     let mut app = crate::SlideApp::new(deckcraft_engine::Session::with_new(), Default::default());

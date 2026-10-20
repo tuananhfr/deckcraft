@@ -28,6 +28,7 @@ pub mod shortcuts;
 pub mod show;
 pub mod sorter;
 pub mod status;
+pub mod status_fit;
 pub mod textures;
 pub mod theme;
 pub mod thumbs;
@@ -1361,6 +1362,12 @@ mod narrow_tests;
 
 #[cfg(test)]
 mod touch_tests;
+
+#[cfg(test)]
+mod prompt_tests;
+
+#[cfg(test)]
+mod status_tests;
 
 #[cfg(test)]
 mod tests {
