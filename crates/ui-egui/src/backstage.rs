@@ -152,8 +152,8 @@ pub enum ExportTask {
 #[derive(Clone, Debug)]
 pub struct Backstage {
     pub page: Page,
-    /// The open presentations (count, active) when it opened: a change closes it.
-    pub docs: (usize, Option<usize>),
+    /// The open presentations (count, active uid) when it opened: a change closes it.
+    pub docs: (usize, Option<u64>),
     /// Keyboard focus in the side menu (an index into [`entries`], top then bottom).
     pub focus: Option<usize>,
     /// Search text on Home, New and Open.
@@ -175,7 +175,7 @@ pub struct Backstage {
 }
 
 impl Backstage {
-    pub fn new(page: Page, docs: (usize, Option<usize>)) -> Backstage {
+    pub fn new(page: Page, docs: (usize, Option<u64>)) -> Backstage {
         Backstage {
             page,
             docs,

@@ -57,6 +57,8 @@ pub fn start() {
                         }
                     } else if let Err(e) = app.run("file.new", serde_json::json!({})) {
                         log::error!("new presentation: {e}");
+                    } else if let Some(d) = app.session.active_mut() {
+                        d.placeholder = true;
                     }
                     if q.contains("show") {
                         app.start_show(0, false);

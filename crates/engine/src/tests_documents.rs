@@ -91,3 +91,71 @@ fn closing_another_presentation_keeps_the_active_one() {
     let journal: Vec<&str> = s.journal.iter().map(|(id, _)| id.as_str()).collect();
     assert!(journal.contains(&"window.next") && journal.contains(&"file.close"), "{journal:?}");
 }
+
+fn open_named(s: &mut Session, name: &str) -> Result<serde_json::Value> {
+    let bytes = cmd::file::save_bytes(&model::defaults::new_presentation(None), "pptx").unwrap();
+    s.execute("file.openBytes", &json!({"name": format!("{name}.pptx"), "data": cmd::base64_encode(&bytes)}))
+}
+
+fn names(prefix: &str, n: usize) -> Vec<String> {
+    (0..n).map(|i| format!("{prefix}{i}")).collect()
+}
+
+#[test]
+fn an_untouched_sample_never_takes_a_slot() {
+    let mut s = Session::new();
+    sample::open_sample(&mut s).unwrap();
+    for name in names("f", MAX_DOCUMENTS) {
+        open_named(&mut s, &name).unwrap();
+    }
+    assert_eq!(titles(&s), names("f", MAX_DOCUMENTS), "the first one opened replaced the sample");
+
+    // Beside other presentations it stays until the limit, then gives way.
+    let mut s = Session::new();
+    s.execute("file.new", &json!({})).unwrap();
+    sample::open_sample(&mut s).unwrap();
+    for name in names("f", MAX_DOCUMENTS - 2) {
+        open_named(&mut s, &name).unwrap();
+    }
+    assert_eq!(s.documents().len(), MAX_DOCUMENTS);
+    assert_eq!(titles(&s)[1], "Northern Lights");
+    s.set_active(0);
+    open_named(&mut s, "last").unwrap();
+    assert_eq!(s.documents().len(), MAX_DOCUMENTS);
+    assert!(!titles(&s).contains(&"Northern Lights".to_string()));
+    assert_eq!(s.doc().unwrap().title(), "last", "the new one is active");
+    assert!(refused(s.execute("file.new", &json!({}))), "{} user presentations fill every slot", MAX_DOCUMENTS);
+}
+
+#[test]
+fn an_edited_sample_counts() {
+    let mut s = Session::new();
+    sample::open_sample(&mut s).unwrap();
+    s.execute("slide.new", &json!({})).unwrap();
+    for name in names("f", MAX_DOCUMENTS - 1) {
+        open_named(&mut s, &name).unwrap();
+    }
+    assert!(refused(open_named(&mut s, "more")));
+    assert_eq!(titles(&s)[0], "Northern Lights");
+
+    // An undone edit leaves something to redo, so it still counts.
+    let mut s = Session::new();
+    sample::open_sample(&mut s).unwrap();
+    s.execute("slide.new", &json!({})).unwrap();
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert!(!s.doc().unwrap().is_dirty());
+    open_named(&mut s, "f").unwrap();
+    assert_eq!(titles(&s), ["Northern Lights", "f"]);
+}
+
+#[test]
+fn only_a_placeholder_blank_is_replaced() {
+    let mut s = Session::with_new();
+    open_named(&mut s, "f").unwrap();
+    assert_eq!(titles(&s), ["Presentation1", "f"], "a blank the user made stays");
+
+    let mut s = Session::with_new();
+    s.active_mut().unwrap().placeholder = true;
+    s.execute("file.new", &json!({})).unwrap();
+    assert_eq!(titles(&s), ["Presentation2"], "the start blank gives way to a new one too");
+}

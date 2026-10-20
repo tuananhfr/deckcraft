@@ -187,6 +187,9 @@ pub struct DocState {
     pub missing_fonts: Vec<String>,
     /// An input method's composition in progress ([`Composition`]).
     pub composition: Option<Composition>,
+    /// Opened by the app, not the user (the built-in sample, the web build's blank start
+    /// presentation): untouched, it gives way to the next one ([`Session::add_document`]).
+    pub placeholder: bool,
 }
 
 static NEXT_UID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
@@ -206,10 +209,15 @@ impl DocState {
             title,
             missing_fonts: Vec::new(),
             composition: None,
+            placeholder: false,
         }
     }
     pub fn is_dirty(&self) -> bool {
         !Arc::ptr_eq(&self.doc, &self.saved_doc)
+    }
+    /// A placeholder with no file, no changes and nothing to undo or redo: closing it loses nothing.
+    pub fn is_untouched_placeholder(&self) -> bool {
+        self.placeholder && self.path.is_none() && !self.is_dirty() && self.history.undo.is_empty() && self.history.redo.is_empty()
     }
     pub fn title(&self) -> String {
         self.path
@@ -424,13 +432,22 @@ impl Session {
             self.active = Some(i);
         }
     }
-    /// Another presentation can be opened ([`MAX_DOCUMENTS`]).
+    /// Another presentation can be opened ([`MAX_DOCUMENTS`]; an untouched placeholder doesn't
+    /// count).
     pub fn ensure_room(&self) -> Result<()> {
-        if self.docs.len() < MAX_DOCUMENTS { Ok(()) } else { Err(EngineError::TooManyDocuments) }
+        if self.docs.len() < MAX_DOCUMENTS || self.replaced_placeholder().is_some() { Ok(()) } else { Err(EngineError::TooManyDocuments) }
+    }
+    /// The untouched placeholder the next presentation takes the place of: the only one open (as
+    /// WordCraft replaces its blank start document), or any one once the limit is reached.
+    fn replaced_placeholder(&self) -> Option<usize> {
+        if self.docs.len() == 1 || self.docs.len() >= MAX_DOCUMENTS { self.docs.iter().position(DocState::is_untouched_placeholder) } else { None }
     }
     /// Every open and new presentation comes through here, so this is where the limit holds.
     pub fn add_document(&mut self, d: DocState) -> Result<usize> {
         self.ensure_room()?;
+        if let Some(p) = self.replaced_placeholder() {
+            self.close_document(p);
+        }
         self.docs.push(d);
         let i = self.docs.len() - 1;
         self.active = Some(i);

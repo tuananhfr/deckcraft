@@ -133,6 +133,7 @@ pub fn open_sample(s: &mut Session) -> Result<()> {
         st.history.redo.clear();
         st.saved_doc = st.doc.clone();
         st.title = "Northern Lights".into();
+        st.placeholder = true;
     }
     Ok(())
 }

@@ -189,7 +189,8 @@ fn save_and_reopen_native() {
     let n = s.doc().unwrap().doc.slides.len();
     s.execute("file.openBytes", &json!({"name": "x.deckcraft", "data": bytes})).unwrap();
     assert_eq!(s.doc().unwrap().doc.slides.len(), n);
-    assert_eq!(s.documents().len(), 2);
+    assert_eq!(s.documents().len(), 1, "the reopened copy took the untouched sample's place");
+    assert_eq!(s.doc().unwrap().title(), "x");
 }
 
 #[test]

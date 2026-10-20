@@ -200,6 +200,22 @@ fn new_creates_a_presentation() {
     assert!(h.state().backstage.is_none());
 }
 
+/// The web build starts on the sample: a presentation made over it takes its place, and the File
+/// tab still closes although the count and the active index stay the same.
+#[test]
+fn new_over_the_untouched_start_sample_replaces_it() {
+    let mut session = Session::new();
+    deckcraft_engine::sample::open_sample(&mut session).unwrap();
+    let mut h = harness(SlideApp::new(session, Services::default()));
+    h.state_mut().run("app.backstage", json!({"page": "new"})).unwrap();
+    h.run_steps(3);
+    h.get_by_label("Blank Presentation").click();
+    h.run_steps(3);
+    let titles: Vec<String> = h.state().session.documents().iter().map(|d| d.title()).collect();
+    assert!(titles.len() == 1 && titles[0].starts_with("Presentation"), "{titles:?}");
+    assert!(h.state().backstage.is_none(), "the new presentation shows");
+}
+
 /// Open lists recent presentations by name (filtered by the search box) and opens one.
 #[test]
 fn open_lists_recent_files_and_opens_one() {

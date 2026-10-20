@@ -377,8 +377,10 @@ impl SlideApp {
         r
     }
 
-    pub(crate) fn docs_key(&self) -> (usize, Option<usize>) {
-        (self.session.documents().len(), self.session.active_index())
+    /// The active presentation by uid, not index: one that replaced an untouched placeholder has
+    /// the same count and index.
+    pub(crate) fn docs_key(&self) -> (usize, Option<u64>) {
+        (self.session.documents().len(), self.session.active().map(|d| d.uid))
     }
 
     /// The File tab's view is open over a presentation (not just the start screen with nothing
