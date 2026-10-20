@@ -13,8 +13,16 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!(noundo "edit.undo", "Undo", ["Edit"], Some("Cmd+Z"), "{}", can_undo, undo),
         cmd!(noundo "edit.redo", "Redo", ["Edit"], Some("Cmd+Y"), "{}", can_redo, redo),
         cmd!("edit.cut", "Cut", ["Home", "Clipboard"], Some("Cmd+X"), "{scope?: slides}", has_doc, cut),
-        cmd!(noundo "edit.copy", "Copy", ["Home", "Clipboard"], Some("Cmd+C"), "{scope?: slides} → {text}", has_doc, copy),
-        cmd!("edit.paste", "Paste", ["Home", "Clipboard"], Some("Cmd+V"), "{text?: plain text to paste, scope?: slides}", has_doc, paste),
+        cmd!(noundo "edit.copy", "Copy", ["Home", "Clipboard"], Some("Cmd+C"), "{scope?: slides} → {text, copied}", has_doc, copy),
+        cmd!(
+            "edit.paste",
+            "Paste",
+            ["Home", "Clipboard"],
+            Some("Cmd+V"),
+            "{text?: plain text to paste, html?: string, scope?: slides}",
+            has_doc,
+            paste
+        ),
         cmd!("edit.pasteText", "Paste and Match Formatting", ["Edit"], Some("Cmd+Shift+V"), "{text?}", has_doc, paste_text),
         cmd!("edit.duplicate", "Duplicate", ["Edit"], Some("Cmd+D"), "{ids?}", has_selection, duplicate),
         cmd!("edit.delete", "Delete", ["Edit"], Some("Delete"), "{ids?, scope?: slides}", has_doc, delete),
@@ -66,7 +74,7 @@ fn media_of_shapes(shapes: &[Shape], out: &mut Vec<MediaId>) {
     });
 }
 
-fn copy_inner(s: &mut Session, p: &Value) -> Result<String> {
+fn copy_inner(s: &mut Session, p: &Value) -> Result<(String, bool)> {
     let st = s.doc()?;
     // Text selection.
     if let Some(t) = &st.selection.text {
@@ -76,9 +84,9 @@ fn copy_inner(s: &mut Session, p: &Value) -> Result<String> {
             let plain = deckcraft_model::edit::text_range(&body, a, b);
             let sliced = deckcraft_model::edit::slice(&body, a, b);
             s.clipboard = crate::Clipboard { text: Some(sliced), plain: plain.clone(), ..Default::default() };
-            return Ok(plain);
+            return Ok((plain, true));
         }
-        return Ok(String::new());
+        return Ok((String::new(), false));
     }
     if slides_scope(s, p) {
         let ids: Vec<SlideId> =
@@ -90,8 +98,9 @@ fn copy_inner(s: &mut Session, p: &Value) -> Result<String> {
         }
         let media = st.doc.media.iter().filter(|m| mids.contains(&m.id)).cloned().collect();
         let plain = slides.iter().map(|x| x.title()).collect::<Vec<_>>().join("\n");
+        let copied = !slides.is_empty();
         s.clipboard = crate::Clipboard { slides, media, plain: plain.clone(), ..Default::default() };
-        return Ok(plain);
+        return Ok((plain, copied));
     }
     let shapes: Vec<Shape> = st
         .selection
@@ -110,19 +119,20 @@ fn copy_inner(s: &mut Session, p: &Value) -> Result<String> {
     media_of_shapes(&shapes, &mut mids);
     let media = st.doc.media.iter().filter(|m| mids.contains(&m.id)).cloned().collect();
     let plain = shapes.iter().filter_map(|x| x.text.as_ref().map(|t| t.text())).collect::<Vec<_>>().join("\n");
+    let copied = !shapes.is_empty();
     s.clipboard = crate::Clipboard { shapes, media, plain: plain.clone(), ..Default::default() };
-    Ok(plain)
+    Ok((plain, copied))
 }
 
 fn copy(s: &mut Session, p: &Value) -> Result<Value> {
-    let t = copy_inner(s, p)?;
-    Ok(json!({"text": t}))
+    let (text, copied) = copy_inner(s, p)?;
+    Ok(json!({"text": text, "copied": copied}))
 }
 
 fn cut(s: &mut Session, p: &Value) -> Result<Value> {
-    let t = copy_inner(s, p)?;
+    let (text, copied) = copy_inner(s, p)?;
     delete(s, p)?;
-    Ok(json!({"text": t}))
+    Ok(json!({"text": text, "copied": copied}))
 }
 
 /// Give pasted shapes fresh ids (groups included) and map connector ends.

@@ -8,6 +8,7 @@
 
 pub mod backstage;
 pub mod canvas;
+pub mod clipboard;
 mod clipboard_keys;
 pub mod close_many;
 pub mod control;
@@ -96,6 +97,12 @@ pub struct Services {
     pub inbox: Option<Inbox>,
     /// Image on the system clipboard (PNG bytes), when the host can read one.
     pub clipboard_image: Option<Box<dyn FnMut() -> Option<Vec<u8>>>>,
+    /// Rich data for the paste delivered in this frame; absent on desktop hosts.
+    pub clipboard_html: Option<Box<dyn FnMut() -> Option<String>>>,
+    pub clipboard_text: Option<Box<dyn FnMut() -> Option<String>>>,
+    pub set_clipboard_html: Option<clipboard::SetClipboardHtmlFn>,
+    /// Starts an asynchronous system clipboard read for a Paste button.
+    pub request_clipboard: Option<Box<dyn FnMut()>>,
     /// Audio output for media playback (cpal on desktop); without one media plays silently.
     pub audio_out: Option<Box<dyn deckcraft_media::AudioOut>>,
 }
@@ -257,6 +264,7 @@ pub struct SlideApp {
     /// creating or closing a presentation leaves it.
     pub backstage: Option<backstage::Backstage>,
     pending_urls: Vec<String>,
+    clipboard_fallback: Option<String>,
     shot_token: u64,
     queued_shots: Vec<(u64, f64, u32)>,
     pending_shots: Vec<(u64, Option<String>, Sender<ControlResponse>, f64)>,
@@ -326,6 +334,7 @@ impl SlideApp {
             integrated_titlebar: false,
             backstage: None,
             pending_urls: vec![],
+            clipboard_fallback: None,
             shot_token: 0,
             queued_shots: vec![],
             pending_shots: vec![],
@@ -371,6 +380,9 @@ impl SlideApp {
     /// Run a command by id (UI commands here, everything else in the engine). Errors show in the
     /// status bar and are returned.
     pub fn run(&mut self, id: &str, params: Value) -> Result<Value, String> {
+        if self.request_clipboard_for_command(id, &params) {
+            return Ok(Value::Null);
+        }
         // Zoom commands act on the presentation shown, even one switched to since the last frame.
         self.sync_doc_view();
         let r = if UI_COMMANDS.iter().any(|c| c.0 == id) {
@@ -384,6 +396,7 @@ impl SlideApp {
         if let Err(e) = &r {
             self.set_status(e.clone());
         }
+        self.copy_command_result(id, &r);
         self.drain_requests();
         r
     }
@@ -1147,34 +1160,20 @@ impl SlideApp {
                 }
                 egui::Event::Ime(ime) => self.ime_event(&ime),
                 egui::Event::Copy => {
-                    if let Ok(v) = self.session.execute("edit.copy", &json!({}))
-                        && let Some(t) = v.get("text").and_then(Value::as_str)
-                    {
-                        ctx.copy_text(t.to_string());
+                    if let Ok(v) = self.session.execute("edit.copy", &json!({})) {
+                        self.write_clipboard(&v);
                     }
                 }
                 egui::Event::Cut => {
-                    if let Ok(v) = self.session.execute("edit.cut", &json!({}))
-                        && let Some(t) = v.get("text").and_then(Value::as_str)
-                    {
-                        ctx.copy_text(t.to_string());
+                    if let Ok(v) = self.session.execute("edit.cut", &json!({})) {
+                        self.write_clipboard(&v);
                     }
                 }
                 egui::Event::Paste(text) => {
                     if ignore_paste {
                         continue;
                     }
-                    // An image on the clipboard (screenshots, copied pictures) becomes a picture.
-                    let img = if text.is_empty() { self.services.clipboard_image.as_mut().and_then(|f| f()) } else { None };
-                    let r = match img {
-                        Some(png) => self
-                            .session
-                            .execute("insert.picture", &json!({"name": "Pasted image.png", "data": deckcraft_engine::cmd::base64_encode(&png)})),
-                        None => self.session.execute("edit.paste", &json!({"text": text})),
-                    };
-                    if let Err(e) = r {
-                        self.set_status(e.to_string());
-                    }
+                    self.paste_clipboard(text);
                 }
                 egui::Event::Key { key, pressed: true, modifiers, .. } => {
                     let mods = Mods { shift: modifiers.shift, alt: modifiers.alt, cmd: modifiers.command || modifiers.ctrl };
@@ -1261,6 +1260,7 @@ impl SlideApp {
             ctx.open_url(egui::OpenUrl::new_tab(url));
         }
         self.drain_requests();
+        self.flush_clipboard(&ctx);
         self.perf.frame_ms = now_ms() - t0;
     }
 
@@ -1404,6 +1404,9 @@ fn js_now() -> f64 {
 
 #[cfg(test)]
 mod clipboard_keys_tests;
+
+#[cfg(test)]
+mod clipboard_tests;
 
 #[cfg(test)]
 mod doctabs_tests;

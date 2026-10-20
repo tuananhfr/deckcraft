@@ -8,6 +8,7 @@ use deckcraft_engine::Session;
 use deckcraft_ui_egui::{Inbox, SaveDone, SaveOutcome, Services, SlideApp};
 use wasm_bindgen::JsCast as _;
 
+use crate::clipboard::ClipboardBridge;
 use crate::draft_bridge::DraftBridge;
 
 const PRESENTATION_EXTS: &[&str] = &["deckcraft", "pptx", "potx", "ppsx", "txt", "md"];
@@ -47,8 +48,12 @@ pub fn start() {
                         log::info!("deckcraft-web {}: wgpu backend {:?}", env!("CARGO_PKG_VERSION"), rs.adapter.get_info().backend);
                     }
                     let inbox: Inbox = Inbox::default();
-                    let mut app = SlideApp::new(Session::new(), services(inbox.clone(), cc.egui_ctx.clone()));
+                    let clipboard = ClipboardBridge::install(cc.egui_ctx.clone()).ok();
+                    let mut app = SlideApp::new(Session::new(), services(inbox.clone(), cc.egui_ctx.clone(), clipboard.clone()));
                     app.ui.language = crate::language::initial();
+                    if clipboard.is_none() {
+                        app.note_clipboard(deckcraft_ui_egui::clipboard::ClipboardNotice::ReadDenied);
+                    }
                     let language = app.ui.language.clone();
                     let q = query();
                     if !q.contains("blank") {
@@ -63,7 +68,7 @@ pub fn start() {
                     if q.contains("show") {
                         app.start_show(0, false);
                     }
-                    Ok(Box::new(WebShell { app, inbox, dirty, drafts: DraftBridge::new(), language }))
+                    Ok(Box::new(WebShell { app, inbox, dirty, drafts: DraftBridge::new(), language, clipboard }))
                 }),
             )
             .await;
@@ -90,6 +95,7 @@ struct WebShell {
     drafts: DraftBridge,
     /// The interface language last remembered, to save it only when it changes.
     language: String,
+    clipboard: Option<ClipboardBridge>,
 }
 
 impl eframe::App for WebShell {
@@ -110,6 +116,14 @@ impl eframe::App for WebShell {
             });
         }
         self.app.logic(ctx);
+        if let Some(clipboard) = &self.clipboard {
+            if let Some(notice) = clipboard.take_notice() {
+                self.app.note_clipboard(notice);
+            }
+            if clipboard.image_only() {
+                self.app.paste_clipboard_image(ctx);
+            }
+        }
         self.drafts.logic(&mut self.app, ctx);
         if self.app.ui.language != self.language {
             self.language.clone_from(&self.app.ui.language);
@@ -118,6 +132,9 @@ impl eframe::App for WebShell {
     }
 
     fn raw_input_hook(&mut self, _ctx: &egui::Context, raw: &mut egui::RawInput) {
+        if let Some(clipboard) = &self.clipboard {
+            clipboard.begin_frame(raw);
+        }
         self.app.raw_input_hook(raw);
     }
 
@@ -131,10 +148,10 @@ impl eframe::App for WebShell {
 
 /// Web services: no file paths, so `pick_open`/`pick_save`/`read` stay `None` and the UI falls
 /// back to `open_async` (browser picker → inbox), `save_file` (Save) and `download` (exports).
-fn services(inbox: Inbox, ctx: egui::Context) -> Services {
+fn services(inbox: Inbox, ctx: egui::Context, clipboard: Option<ClipboardBridge>) -> Services {
     let open_inbox = inbox.clone();
     let save_ctx = ctx.clone();
-    Services {
+    let mut services = Services {
         open_async: Some(Box::new(move |purpose: &str| {
             let inbox = open_inbox.clone();
             let ctx = ctx.clone();
@@ -162,7 +179,19 @@ fn services(inbox: Inbox, ctx: egui::Context) -> Services {
         save_file: Some(Box::new(move |name: &str, bytes: &[u8], done: SaveDone| save_file(&save_ctx, name, bytes, done))),
         inbox: Some(inbox),
         ..Default::default()
+    };
+    if let Some(clipboard) = clipboard {
+        let html = clipboard.clone();
+        let text = clipboard.clone();
+        let image = clipboard.clone();
+        let write = clipboard.clone();
+        services.clipboard_html = Some(Box::new(move || html.peek_html()));
+        services.clipboard_text = Some(Box::new(move || text.peek_text()));
+        services.clipboard_image = Some(Box::new(move || image.take_image()));
+        services.set_clipboard_html = Some(Box::new(move |html, text| write.write(html, text)));
+        services.request_clipboard = Some(Box::new(move || clipboard.request_read()));
     }
+    services
 }
 
 /// Closing, reloading or leaving the tab with unsaved changes asks first. Browsers show their own
