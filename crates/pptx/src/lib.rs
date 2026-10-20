@@ -8,6 +8,7 @@
 #![forbid(unsafe_code)]
 
 mod custgeom;
+mod losses;
 mod maps;
 mod opc;
 mod png;
@@ -17,6 +18,7 @@ mod write;
 mod xml;
 
 use deckcraft_model::Presentation;
+pub use losses::opaque_loss_kind;
 
 /// Extension URI of the PowerPoint 2010 section list in `presentation.xml`.
 pub(crate) const SECTION_EXT_URI: &str = "{521415D9-36F7-43E2-AB2F-B90AF26B5E84}";

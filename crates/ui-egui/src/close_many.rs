@@ -115,6 +115,9 @@ impl SlideApp {
             b.needs_click = false;
             b.started = Some(uid);
             self.save_document(i);
+            if self.awaiting_loss_confirmation(uid) {
+                return Step::Waiting(uid);
+            }
         }
     }
 

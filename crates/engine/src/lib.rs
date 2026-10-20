@@ -24,6 +24,7 @@ mod paste_inherit;
 pub mod recovery;
 mod rich_paste;
 pub mod sample;
+pub mod save_losses;
 mod table_paste;
 pub mod tools;
 
@@ -38,6 +39,7 @@ pub use deckcraft_geom as geom;
 pub use deckcraft_media as media;
 pub use deckcraft_model as model;
 pub use deckcraft_render as render;
+pub use save_losses::LossItem;
 pub use tools::{Mods, PointerEvent, PointerKind, ToolKind};
 
 #[derive(Debug, thiserror::Error)]

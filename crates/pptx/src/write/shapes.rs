@@ -634,8 +634,7 @@ fn media(w: &mut W, x: &mut Exp, o: &mut Out, id: u32, s: &Shape, m: &deckcraft_
 fn opaque(w: &mut W, x: &mut Exp, o: &mut Out, cx: &mut Ctx, s: &Shape, xml: &str, preview: Option<deckcraft_model::MediaId>, label: &str) {
     // Kept XML that references no relationships can be written back as it was.
     if let Ok(doc) = crate::xml::parse(xml.as_bytes())
-        && !crate::read::has_rel_refs(&doc.root)
-        && matches!(doc.root.local(), "graphicFrame" | "sp" | "grpSp" | "cxnSp")
+        && crate::losses::preserved(&doc.root)
     {
         let mut root = doc.root;
         let id = cx.id_for(s);

@@ -1,5 +1,7 @@
 # ERPCons changes
 
+- Loss warnings before Save, Save As and Export (both): one translated dialog lists OLE objects reduced to previews, removed digital signatures and macros, and discarded part kinds; Save Anyway proceeds once, Save a Copy preserves the open document's name and saved state, and Cancel writes nothing, including before browser saves start.
+
 This branch (`erpcons`) is the ERPCons Văn phòng fork of [DeckCraft](https://github.com/storytold/deckcraft), based on DeckCraft by the ArtCraft team, licensed MIT OR Apache-2.0 (see `LICENSE-MIT`, `LICENSE-APACHE`, `NOTICE`). Changes from upstream `main` (Apache-2.0 §4b):
 
 - Removed the ArtCraft logos and marks (`docs/brand/`) and every link to the ArtCraft Discord and getartcraft.com, as the ArtCraft brand terms require for forks: About dialog, Backstage Home and Account, the ribbon's "Learn More" group, `app.links`, the CLI and the MCP server info, README.

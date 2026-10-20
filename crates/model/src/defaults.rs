@@ -496,6 +496,7 @@ pub fn blank_presentation(size: Size, theme: Theme, title_slide: bool) -> Presen
     let (master, next) = build_master(size, theme, 1);
     let first_layout = master.layouts.first().map(|l| l.id).unwrap_or_default();
     let mut p = Presentation {
+        import_losses: Default::default(),
         slide_size: size,
         notes_size: Size::new(540.0, 720.0),
         slides: vec![],

@@ -56,6 +56,7 @@ fn title(id: &str) -> &'static str {
         "trim" => "Trim Media",
         "smartart" => "Choose a SmartArt Graphic",
         "shortcuts" => "Keyboard Shortcuts",
+        crate::loss_warning::DIALOG => "Saving will lose some content",
         _ => "DeckCraft",
     }
 }
@@ -71,14 +72,25 @@ pub fn show(app: &mut SlideApp, ctx: &egui::Context) {
         .anchor(Align2::CENTER_CENTER, vec2(0.0, -40.0))
         .open(&mut open)
         .show(ctx, |ui| {
-            ui.set_min_width(340.0);
+            let width = if d.id == crate::loss_warning::DIALOG { (ctx.content_rect().width() - 48.0).clamp(160.0, 440.0) } else { 340.0 };
+            ui.set_min_width(width);
+            if d.id == crate::loss_warning::DIALOG {
+                ui.set_max_width(width);
+            }
             close = body(app, ui, &mut d);
         });
+    let suspended = d.id != crate::loss_warning::DIALOG && app.dialog.as_ref().is_some_and(|d| d.id == crate::loss_warning::DIALOG);
+    if suspended {
+        app.suspend_for_loss_warning(d.clone());
+        return;
+    }
     if open && !close && !ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
         app.dialog = Some(d);
     } else if d.id == crate::close_many::DIALOG {
         // Esc or the window's ×: the same as Cancel.
         app.close_batch = None;
+    } else if d.id == crate::loss_warning::DIALOG && !close {
+        crate::loss_warning::cancel(app);
     }
 }
 
@@ -130,6 +142,7 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
     match d.id.as_str() {
         "shortcuts" => crate::shortcuts::body(app, ui, d),
         crate::close_many::DIALOG => crate::close_many::body(app, ui, d),
+        crate::loss_warning::DIALOG => crate::loss_warning::body(app, ui, d),
         "table" => {
             field(ui, d, "Number of columns:", "cols", "5");
             field(ui, d, "Number of rows:", "rows", "2");
@@ -271,6 +284,16 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
                 None => app.session.active_index(),
             };
             let Some((i, name, uid)) = target.and_then(|i| app.session.documents().get(i).map(|x| (i, x.title(), x.uid))) else { return true };
+            if d.fields.contains_key("lossSaveStarted") {
+                if app.save_state(uid) == Some(crate::save_state::SaveState::Saving) {
+                    ui.label(crate::tl!("Saving…"));
+                    return false;
+                }
+                if app.session.documents().get(i).is_some_and(|d| !d.is_dirty()) {
+                    run(app, "file.close", json!({"index": i}));
+                }
+                return true;
+            }
             ui.label(
                 egui::RichText::new(crate::i18n::fmt(
                     crate::tl!("Do you want to save the changes you made to {what}?"),

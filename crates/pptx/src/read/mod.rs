@@ -2,6 +2,7 @@
 
 mod chart;
 pub(crate) mod dml;
+mod losses;
 mod shapes;
 mod theme;
 mod timing;
@@ -402,6 +403,7 @@ pub fn import(bytes: &[u8]) -> Result<Presentation, PptxError> {
     p.media = std::mem::take(&mut imp.media);
     p.next_id = imp.next;
     p.fix_next_id();
+    p.import_losses = losses::inventory(&pkg);
     Ok(p)
 }
 

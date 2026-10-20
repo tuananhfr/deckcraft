@@ -28,3 +28,6 @@ thiserror = { workspace = true }
 log = { workspace = true }
 unicode-normalization = { workspace = true }
 image = { workspace = true }
+
+[dev-dependencies]
+zip = { workspace = true }

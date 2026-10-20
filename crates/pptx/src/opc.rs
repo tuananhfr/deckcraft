@@ -1,6 +1,7 @@
 //! Open Packaging Conventions: the zip container, part names, relationships and content types.
 
-use std::collections::HashMap;
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
 use std::io::{Cursor, Write};
 
 use deckcraft_model::inflate::{InflateError, Inflater, LIMITS, Limits};
@@ -28,6 +29,7 @@ pub const RT_CORE: &str = "http://schemas.openxmlformats.org/package/2006/relati
 /// The files of a package, keyed by normalised part name (no leading slash, lowercase).
 pub struct Package {
     parts: HashMap<String, (String, Vec<u8>)>,
+    read_parts: RefCell<HashSet<String>>,
 }
 
 impl Package {
@@ -69,10 +71,21 @@ impl Package {
             };
             parts.insert(name.to_ascii_lowercase(), (name, data));
         }
-        Ok(Package { parts })
+        Ok(Package { parts, read_parts: RefCell::new(HashSet::new()) })
     }
     pub fn get(&self, name: &str) -> Option<&[u8]> {
-        self.parts.get(&norm(name)).map(|(_, d)| d.as_slice())
+        let key = norm(name);
+        let (_, data) = self.parts.get(&key)?;
+        if let Ok(mut read) = self.read_parts.try_borrow_mut() {
+            read.insert(key);
+        }
+        Some(data.as_slice())
+    }
+    pub(crate) fn names(&self) -> impl Iterator<Item = &str> {
+        self.parts.keys().map(String::as_str)
+    }
+    pub(crate) fn read_parts(&self) -> HashSet<String> {
+        self.read_parts.try_borrow().map(|read| read.clone()).unwrap_or_default()
     }
     /// Parse an XML part.
     pub fn xml(&self, name: &str) -> Option<xml::Doc> {

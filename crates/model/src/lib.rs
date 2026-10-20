@@ -11,6 +11,7 @@ pub mod anim;
 pub mod chart;
 pub mod defaults;
 pub mod edit;
+pub mod import_losses;
 pub mod inflate;
 pub mod numfmt;
 pub mod resolve;
@@ -821,6 +822,8 @@ pub struct MediaItem {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Presentation {
+    #[serde(skip_serializing_if = "import_losses::ImportLosses::is_empty")]
+    pub import_losses: import_losses::ImportLosses,
     /// Slide size in points (default 16:9, 960 × 540).
     pub slide_size: Size,
     pub notes_size: Size,

@@ -21,11 +21,13 @@ pub mod fillui;
 pub mod find;
 pub mod i18n;
 pub mod icons;
+mod loss_warning;
 pub mod media;
 pub mod menus;
 pub mod narrow;
 pub mod panes;
 pub mod ribbon;
+mod save_copy;
 pub mod save_state;
 pub mod selpane;
 pub mod shortcuts;
@@ -298,6 +300,7 @@ pub struct SlideApp {
     pub(crate) close_batch: Option<close_many::CloseBatch>,
     /// Saving and failed saves, for the title bar.
     pub(crate) save_status: save_state::SaveStatus,
+    pub(crate) loss_warning: loss_warning::LossWarning,
 }
 
 /// A save the host hasn't finished: the presentation as it was written, by document uid.
@@ -306,6 +309,7 @@ struct PendingSave {
     uid: u64,
     written: std::sync::Arc<deckcraft_model::Presentation>,
     name: String,
+    copy: bool,
 }
 
 impl SlideApp {
@@ -357,6 +361,7 @@ impl SlideApp {
             canvas_touch: Default::default(),
             close_batch: None,
             save_status: Default::default(),
+            loss_warning: Default::default(),
         }
     }
 
@@ -380,6 +385,9 @@ impl SlideApp {
     /// Run a command by id (UI commands here, everything else in the engine). Errors show in the
     /// status bar and are returned.
     pub fn run(&mut self, id: &str, params: Value) -> Result<Value, String> {
+        if self.warn_save_command(id, &params) {
+            return Ok(json!({"needsConfirmation": true}));
+        }
         if self.request_clipboard_for_command(id, &params) {
             return Ok(Value::Null);
         }
@@ -498,6 +506,9 @@ impl SlideApp {
                 return false;
             }
         };
+        if self.warn_save_losses(format, loss_warning::Action::Export(fmt.into(), extra.clone())) {
+            return false;
+        }
         let suggested = self.suggested_name(ext);
         if let Some(pick) = self.services.pick_save.as_mut() {
             let Some(path) = pick(&suggested) else { return false };
@@ -548,6 +559,9 @@ impl SlideApp {
     /// layout, slides and options) is written to the temporary folder and opened in the system's
     /// PDF viewer, which has the printers; on the web it downloads.
     pub fn print_pdf(&mut self, params: Value) -> bool {
+        if self.warn_save_losses("pdf", loss_warning::Action::Print(params.clone())) {
+            return false;
+        }
         let Some((title, doc)) = self.session.active().map(|d| (d.title(), d.doc.clone())) else { return false };
         let mut params = if params.is_object() { params } else { json!({}) };
         if self.services.pick_save.is_none() {
@@ -759,20 +773,12 @@ impl SlideApp {
         let name = self.session.active().map(|d| d.title()).unwrap_or_else(|| "Presentation".into());
         let ext = if format == "pptx" { "pptx" } else { "deckcraft" };
         let suggested = format!("{name}.{ext}");
+        if self.services.pick_save.is_none() && self.warn_save_losses(ext, loss_warning::Action::SaveAs(format.into())) {
+            return;
+        }
         if let Some(pick) = self.services.pick_save.as_mut() {
             if let Some(path) = pick(&suggested) {
-                match self.session.execute("file.saveAs", &json!({"path": path})) {
-                    Ok(_) => {
-                        self.set_status(crate::i18n::fmt(crate::tl!("Saved {path}"), &[("path", path.as_str())]));
-                        self.ui.recent.retain(|p| *p != path);
-                        self.ui.recent.insert(0, path);
-                        self.note_saved(uid);
-                    }
-                    Err(e) => {
-                        self.note_save_failed(uid, &e.to_string());
-                        self.set_status(e.to_string());
-                    }
-                }
+                self.save_as_path(&path);
             }
         } else if let Some(save) = self.services.save_file.as_mut()
             && let Some(doc) = self.session.active().map(|d| d.doc.clone())
@@ -781,7 +787,7 @@ impl SlideApp {
                 Ok(bytes) => {
                     self.next_save += 1;
                     let id = self.next_save;
-                    self.pending_saves.push(PendingSave { id, uid, written: doc, name: suggested.clone() });
+                    self.pending_saves.push(PendingSave { id, uid, written: doc, name: suggested.clone(), copy: false });
                     let results = self.save_results.clone();
                     save(
                         &suggested,
@@ -831,12 +837,16 @@ impl SlideApp {
             let p = self.pending_saves.remove(i);
             match outcome {
                 SaveOutcome::Saved => {
-                    self.mark_saved(p.uid, p.written);
-                    self.note_saved(p.uid);
+                    if !p.copy {
+                        self.mark_saved(p.uid, p.written);
+                        self.note_saved(p.uid);
+                    }
                 }
                 SaveOutcome::Cancelled => {}
                 SaveOutcome::Failed(e) => {
-                    self.note_save_failed(p.uid, &e);
+                    if !p.copy {
+                        self.note_save_failed(p.uid, &e);
+                    }
                     self.set_status(crate::i18n::fmt(
                         crate::tl!("Couldn't save {name}: {error}"),
                         &[("name", p.name.as_str()), ("error", e.as_str())],
@@ -898,7 +908,15 @@ impl SlideApp {
 
     pub fn save(&mut self) {
         let Some((uid, path)) = self.session.active().map(|d| (d.uid, d.path.clone())) else { return };
-        if path.is_some() {
+        if let Some(path) = path {
+            if path.to_ascii_lowercase().ends_with(".pptm") {
+                self.save_as_dialog("pptx");
+                return;
+            }
+            let format = deckcraft_engine::cmd::file::format_for_path(&path);
+            if self.warn_save_losses(format, loss_warning::Action::Save) {
+                return;
+            }
             match self.session.execute("file.save", &json!({})) {
                 Ok(_) => {
                     self.note_saved(uid);

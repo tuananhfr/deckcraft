@@ -1,4 +1,13 @@
 # Vietnamese (vi) interface catalog. Columns, separated by a TAB:
+	Saving will lose some content	Lưu sẽ mất một số nội dung
+	Save Anyway	Vẫn lưu
+	Save a Copy	Lưu bản sao
+	{count} OLE objects will be replaced by their preview images (or empty placeholders if no preview is available).	{count} đối tượng OLE sẽ được thay bằng ảnh xem trước (hoặc khung trống nếu không có ảnh xem trước).
+	Digital signatures will be removed and will no longer be valid.	Chữ ký số sẽ bị xóa và không còn hiệu lực.
+	Macros will be removed.	Macro sẽ bị xóa.
+	Unsupported parts will be removed: {kinds}	Các thành phần chưa được hỗ trợ sẽ bị xóa: {kinds}
+	{name} - Copy.{ext}	{name} - Bản sao.{ext}
+	Choose a different file to save a copy.	Hãy chọn tệp khác để lưu bản sao.
 #   context <TAB> English source <TAB> translation
 #   context    always empty for now (the column keeps the format shared with the other editors).
 #   source     the English text exactly as in the code (tl!(...), ribbon labels, command labels)
