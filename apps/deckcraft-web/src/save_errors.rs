@@ -1,5 +1,13 @@
 use deckcraft_ui_egui::{SaveOutcome, tl};
 
+pub(crate) fn validate_file_name(name: &str) -> Result<(), SaveOutcome> {
+    if deckcraft_engine::legacy_format::detect(name, &[]).is_some() {
+        Err(SaveOutcome::Failed(tl!("Choose a .pptx file to preserve the legacy original.").into()))
+    } else {
+        Ok(())
+    }
+}
+
 pub(crate) fn outcome(name: &str) -> SaveOutcome {
     if name == "AbortError" {
         SaveOutcome::Cancelled
@@ -29,6 +37,16 @@ mod tests {
             assert_eq!(outcome(name), SaveOutcome::Failed("Trình duyệt không cho phép lưu tệp. Hãy cấp quyền truy cập và thử lại.".into()));
         }
         assert_eq!(outcome("JsValue(private path)"), SaveOutcome::Failed("Trình duyệt không lưu được tệp. Vui lòng thử lại.".into()));
+        i18n::set_current(Lang::EN);
+    }
+
+    #[test]
+    fn legacy_file_handles_are_rejected_before_writing() {
+        i18n::set_current(Lang::from_code("vi").unwrap_or(Lang::EN));
+        for name in ["slides.ppt", "slides.ODP", "slides.PPTM"] {
+            assert_eq!(validate_file_name(name), Err(SaveOutcome::Failed("Hãy chọn tệp .pptx để giữ nguyên tệp gốc ở định dạng cũ.".into())));
+        }
+        assert_eq!(validate_file_name("slides.pptx"), Ok(()));
         i18n::set_current(Lang::EN);
     }
 }

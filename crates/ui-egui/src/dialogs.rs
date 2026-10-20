@@ -65,16 +65,18 @@ pub fn show(app: &mut SlideApp, ctx: &egui::Context) {
     let Some(mut d) = app.dialog.take() else { return };
     let mut open = true;
     let mut close = false;
-    egui::Window::new(crate::tl!(title(&d.id)))
+    let title = if d.id == crate::legacy_format::DIALOG { crate::legacy_format::title(&d) } else { crate::tl!(title(&d.id)).into() };
+    egui::Window::new(title)
         .id(egui::Id::new(("dialog", d.id.clone())))
         .collapsible(false)
         .resizable(false)
         .anchor(Align2::CENTER_CENTER, vec2(0.0, -40.0))
         .open(&mut open)
         .show(ctx, |ui| {
-            let width = if d.id == crate::loss_warning::DIALOG { (ctx.content_rect().width() - 48.0).clamp(160.0, 440.0) } else { 340.0 };
+            let notice = matches!(d.id.as_str(), crate::loss_warning::DIALOG | crate::legacy_format::DIALOG);
+            let width = if notice { (ctx.content_rect().width() - 48.0).clamp(160.0, 440.0) } else { 340.0 };
             ui.set_min_width(width);
-            if d.id == crate::loss_warning::DIALOG {
+            if notice {
                 ui.set_max_width(width);
             }
             close = body(app, ui, &mut d);
@@ -143,6 +145,7 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
         "shortcuts" => crate::shortcuts::body(app, ui, d),
         crate::close_many::DIALOG => crate::close_many::body(app, ui, d),
         crate::loss_warning::DIALOG => crate::loss_warning::body(app, ui, d),
+        crate::legacy_format::DIALOG => crate::legacy_format::body(ui, d),
         "table" => {
             field(ui, d, "Number of columns:", "cols", "5");
             field(ui, d, "Number of rows:", "rows", "2");

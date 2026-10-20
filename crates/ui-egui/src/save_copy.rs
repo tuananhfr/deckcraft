@@ -43,6 +43,8 @@ impl SlideApp {
     }
 
     pub(crate) fn save_as_path(&mut self, path: &str) {
+        let output = deckcraft_engine::legacy_format::output_path(path);
+        let path = output.as_str();
         let format = deckcraft_engine::cmd::file::format_for_path(path);
         if self.warn_save_losses(format, Action::SavePath(path.into())) {
             return;

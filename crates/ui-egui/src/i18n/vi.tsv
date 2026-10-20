@@ -1461,3 +1461,8 @@
 	The browser cannot read the clipboard — use Ctrl+V	Trình duyệt không cho đọc bảng tạm — hãy dùng Ctrl+V
 	Could not write to the clipboard	Không ghi được vào bảng tạm
 	Some clipboard content was too large and was skipped.	Một phần nội dung bảng tạm quá lớn nên đã được bỏ qua.
+	Presentation opened	Đã mở bản trình chiếu
+	Cannot open this {ext} format	Không mở được định dạng {ext} này
+	The {ext} file has been opened. When saved, it will be saved as .pptx.	Tệp {ext} đã được mở. Khi lưu, tệp sẽ được lưu thành .pptx.
+	Open it in PowerPoint or LibreOffice, save it as .pptx, then open it again.	Hãy mở bằng PowerPoint hoặc LibreOffice, lưu thành .pptx rồi mở lại.
+	Choose a .pptx file to preserve the legacy original.	Hãy chọn tệp .pptx để giữ nguyên tệp gốc ở định dạng cũ.

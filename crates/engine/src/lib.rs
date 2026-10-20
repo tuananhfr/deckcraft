@@ -19,6 +19,7 @@ mod html_clip;
 mod html_style;
 mod html_tokens;
 pub mod keys;
+pub mod legacy_format;
 pub mod links;
 mod paste_inherit;
 pub mod recovery;
@@ -59,6 +60,8 @@ pub enum EngineError {
     /// too large for this build. Says nothing else, so the interface can translate it as is.
     #[error("{}", deckcraft_model::inflate::TOO_LARGE)]
     FileTooLarge,
+    #[error("DeckCraft cannot read {} files", .0.extension())]
+    LegacyFormat(legacy_format::LegacyFormat),
     #[error("{0}")]
     Other(String),
     #[error("internal error in `{0}` (the presentation was kept as it was): {1}")]
@@ -197,6 +200,8 @@ pub struct DocState {
     /// Fonts the file's text uses that aren't installed, found when it was opened (empty for new
     /// documents); the app mentions them once.
     pub missing_fonts: Vec<String>,
+    /// Legacy imports need a new PPTX destination even when opened from bytes without a path.
+    pub save_as_pptx: bool,
     /// An input method's composition in progress ([`Composition`]).
     pub composition: Option<Composition>,
     /// Opened by the app, not the user (the built-in sample, the web build's blank start
@@ -209,6 +214,7 @@ static NEXT_UID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::ne
 impl DocState {
     pub fn new(doc: Presentation, path: Option<String>, title: String) -> Self {
         let doc = Arc::new(doc);
+        let save_as_pptx = path.as_deref().is_some_and(|path| legacy_format::detect(path, &[]).is_some());
         DocState {
             saved_doc: doc.clone(),
             doc,
@@ -220,6 +226,7 @@ impl DocState {
             uid: NEXT_UID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             title,
             missing_fonts: Vec::new(),
+            save_as_pptx,
             composition: None,
             placeholder: false,
         }

@@ -12,7 +12,7 @@ use crate::clipboard::ClipboardBridge;
 use crate::draft_bridge::DraftBridge;
 use crate::show_fullscreen::FullscreenBridge;
 
-const PRESENTATION_EXTS: &[&str] = &["deckcraft", "pptx", "potx", "ppsx", "txt", "md"];
+const PRESENTATION_EXTS: &[&str] = &["deckcraft", "pptx", "potx", "ppsx", "ppt", "pptm", "odp", "txt", "md"];
 const PICTURE_EXTS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp", "bmp", "tif", "tiff"];
 const AUDIO_EXTS: &[&str] = &["wav", "mp3", "m4a", "aac", "flac", "ogg", "opus", "aif", "aiff"];
 const VIDEO_EXTS: &[&str] = &["mp4", "m4v", "mov", "webm"];
@@ -305,6 +305,11 @@ fn open_save_picker(picker: &js_sys::Function, name: &str) -> Result<js_sys::Pro
 
 /// Writes `bytes` to a picked file and closes it; only then is the file on disk.
 async fn write_file_handle(handle: &wasm_bindgen::JsValue, bytes: &[u8]) -> Result<(), SaveOutcome> {
+    let name = js_sys::Reflect::get(handle, &wasm_bindgen::JsValue::from_str("name"))
+        .ok()
+        .and_then(|name| name.as_string())
+        .ok_or_else(|| crate::save_errors::outcome(""))?;
+    crate::save_errors::validate_file_name(&name)?;
     let js = |e: wasm_bindgen::JsValue| crate::save_errors::outcome(&js_error_name(&e));
     let method = |target: &wasm_bindgen::JsValue, name: &str| -> Result<js_sys::Function, SaveOutcome> {
         js_sys::Reflect::get(target, &wasm_bindgen::JsValue::from_str(name)).map_err(js)?.dyn_into().map_err(|_| crate::save_errors::outcome(""))

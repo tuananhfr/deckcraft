@@ -22,6 +22,7 @@ pub mod fillui;
 pub mod find;
 pub mod i18n;
 pub mod icons;
+mod legacy_format;
 mod loss_warning;
 pub mod media;
 pub mod menus;
@@ -405,6 +406,8 @@ impl SlideApp {
         let open_before = self.session.documents().len();
         let r = if UI_COMMANDS.iter().any(|c| c.0 == id) {
             self.run_ui(id, &params)
+        } else if matches!(id, "file.open" | "file.openBytes") {
+            self.execute_open(id, &params)
         } else {
             self.session.execute(id, &params).map_err(|e| {
                 self.note_refusal(&e);
@@ -719,10 +722,10 @@ impl SlideApp {
     }
 
     pub fn open_path(&mut self, path: &str) -> Result<(), String> {
-        self.session.execute("file.open", &json!({"path": path})).map_err(|e| {
-            self.note_refusal(&e);
-            e.to_string()
-        })?;
+        let result = self.execute_open("file.open", &json!({"path": path}))?;
+        if result.get("opened").and_then(Value::as_bool) == Some(false) {
+            return Ok(());
+        }
         self.ui.recent.retain(|p| p != path);
         self.ui.recent.insert(0, path.to_string());
         self.ui.recent.truncate(12);
@@ -750,6 +753,7 @@ impl SlideApp {
     }
 
     pub fn save_as_dialog(&mut self, format: &str) {
+        let format = if self.session.active().is_some_and(|d| d.save_as_pptx) { "pptx" } else { format };
         let Some(uid) = self.session.active().map(|d| d.uid) else { return };
         let name = self.session.active().map(|d| d.title()).unwrap_or_else(|| "Presentation".into());
         let ext = if format == "pptx" { "pptx" } else { "deckcraft" };
@@ -876,7 +880,11 @@ impl SlideApp {
     /// Format Save writes when nothing names one. A host with only a download sink (the web) gets
     /// .pptx, which people can open again anywhere; ERPCons decision 2026-10-14.
     fn default_save_format(&self) -> &'static str {
-        if self.services.pick_save.is_none() && self.services.download.is_some() { "pptx" } else { "deckcraft" }
+        if self.session.active().is_some_and(|d| d.save_as_pptx) || (self.services.pick_save.is_none() && self.services.download.is_some()) {
+            "pptx"
+        } else {
+            "deckcraft"
+        }
     }
 
     /// Save every presentation with unsaved changes (asking for a location where needed).
@@ -964,6 +972,7 @@ impl SlideApp {
             || lower.ends_with(".pptx")
             || lower.ends_with(".potx")
             || lower.ends_with(".ppsx")
+            || deckcraft_engine::legacy_format::detect(name, bytes).is_some()
         {
             "file.openBytes"
         } else if ct.starts_with("image/") {
@@ -982,7 +991,9 @@ impl SlideApp {
         if self.session.active().is_none() && cmd != "file.openBytes" {
             let _ = self.session.execute("file.new", &json!({}));
         }
-        if let Err(e) = self.session.execute(cmd, &p) {
+        if cmd == "file.openBytes" {
+            let _ = self.run(cmd, p);
+        } else if let Err(e) = self.session.execute(cmd, &p) {
             self.note_refusal(&e);
             self.set_status(e.to_string());
         }

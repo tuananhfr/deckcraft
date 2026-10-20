@@ -1,5 +1,8 @@
 # ERPCons changes
 
+- Legacy presentation notices (both): OLE2/.ppt and .odp open a translated conversion dialog instead of a status message; .pptm opens with a macro-loss notice, and Save/Save As propose .pptx and preserve the legacy original.
+- Font substitution notice verification (both): regression coverage checks the existing dismissible toast appears once per opened presentation, including tab switches, and lists at most three font names followed by the remaining count.
+
 - Slide show fullscreen (web): request browser fullscreen when the show starts, continue windowed if refused, release fullscreen on every show exit, and end the show when browser fullscreen is left; Presenter View opens only through its explicit command.
 - Touch slide show exit and translation (both): a persistent top-right 44-point close target ends the show with the Vietnamese tooltip "Thoát trình chiếu"; the End control reads "Kết thúc trình chiếu" in Vietnamese.
 

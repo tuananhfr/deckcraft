@@ -76,6 +76,11 @@ fn new(s: &mut Session, p: &Value) -> Result<Value> {
 
 /// Recognise and read presentation bytes (native, PPTX).
 pub fn open_presentation(name: &str, bytes: &[u8]) -> Result<Presentation> {
+    if let Some(format @ (crate::legacy_format::LegacyFormat::Ppt | crate::legacy_format::LegacyFormat::Odp)) =
+        crate::legacy_format::detect(name, bytes)
+    {
+        return Err(EngineError::LegacyFormat(format));
+    }
     let too_large = |name: &str, detail: &str| {
         log::warn!("{name}: refused by the decompression limits: {detail}");
         EngineError::FileTooLarge
@@ -112,6 +117,7 @@ pub fn add_opened(s: &mut Session, name: &str, path: Option<String>, p: Presenta
     let missing_fonts = crate::fonts::missing_fonts(&p);
     let mut st = DocState::new(p, path, title);
     st.missing_fonts = missing_fonts;
+    st.save_as_pptx = crate::legacy_format::detect(name, &[]).is_some();
     s.add_document(st)
 }
 
@@ -123,6 +129,7 @@ fn open(s: &mut Session, p: &Value) -> Result<Value> {
     let doc = open_presentation(path, &bytes)?;
     let native = deckcraft_format::sniff(&bytes) || deckcraft_pptx::sniff(&bytes);
     let i = add_opened(s, path, native.then(|| path.to_string()), doc)?;
+    note_legacy_open(s, path);
     let st = s.doc()?;
     Ok(json!({"document": i, "slides": st.doc.slides.len(), "missingFonts": st.missing_fonts}))
 }
@@ -137,7 +144,17 @@ fn open_bytes(s: &mut Session, p: &Value) -> Result<Value> {
     s.ensure_room()?;
     let doc = open_presentation(name, &data)?;
     let i = add_opened(s, name, None, doc)?;
+    note_legacy_open(s, name);
     Ok(json!({"document": i, "missingFonts": s.doc()?.missing_fonts}))
+}
+
+fn note_legacy_open(s: &mut Session, name: &str) {
+    if let Some(format) = crate::legacy_format::detect(name, &[]) {
+        s.ui_requests.push(crate::UiRequest::Dialog {
+            id: "legacyFormat".into(),
+            params: json!({"extension": format.extension(), "opened": true}),
+        });
+    }
 }
 
 /// Encode the presentation in `format` (`deckcraft`, `pptx`, `outline`).
@@ -207,7 +224,7 @@ pub fn pdf_bytes(doc: &Presentation, p: &Value) -> Result<Vec<u8>> {
 
 pub fn format_for_path(path: &str) -> &'static str {
     let l = path.to_ascii_lowercase();
-    if l.ends_with(".pptx") || l.ends_with(".potx") || l.ends_with(".ppsx") {
+    if l.ends_with(".pptx") || l.ends_with(".potx") || l.ends_with(".ppsx") || l.ends_with(".pptm") {
         "pptx"
     } else if l.ends_with(".png") {
         "png"
@@ -238,6 +255,9 @@ fn mark_saved(s: &mut Session, path: Option<String>) -> Result<()> {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn write_file(path: &str, bytes: &[u8]) -> Result<()> {
+    if crate::legacy_format::detect(path, &[]).is_some() {
+        return Err(EngineError::Other("Choose a .pptx file to preserve the legacy original.".into()));
+    }
     // Write to a temporary sibling then rename, so a failed save never truncates the old file.
     let tmp = format!("{path}.saving");
     std::fs::write(&tmp, bytes).map_err(|e| EngineError::Other(format!("{path}: {e}")))?;
@@ -254,7 +274,9 @@ fn save(s: &mut Session, p: &Value) -> Result<Value> {
         s.ui_requests.push(crate::UiRequest::PickFile { purpose: "saveAs".into() });
         return Ok(json!({"needsPath": true}));
     };
-    let format = str_param(p, "format").unwrap_or(format_for_path(&path));
+    let legacy = crate::legacy_format::detect(&path, &[]).is_some();
+    let path = crate::legacy_format::output_path(&path);
+    let format = if legacy { "pptx" } else { str_param(p, "format").unwrap_or(format_for_path(&path)) };
     let bytes = save_bytes(&s.doc()?.doc, format)?;
     write_file(&path, &bytes)?;
     mark_saved(s, Some(path.clone()))?;

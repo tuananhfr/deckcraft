@@ -87,15 +87,57 @@ pub fn show(app: &mut SlideApp, ctx: &egui::Context) {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used)]
     use super::*;
 
     #[test]
     fn the_message_names_the_fonts() {
+        crate::i18n::set_current(crate::i18n::Lang::EN);
         let f = |v: &[&str]| missing_fonts_message(&v.iter().map(|s| s.to_string()).collect::<Vec<_>>());
         assert_eq!(f(&[]), None);
         assert_eq!(f(&["Aptos"]).unwrap(), "Aptos isn't installed on this computer. Text that uses it is shown in a similar font.");
         assert!(f(&["Aptos", "Sora"]).unwrap().starts_with("Aptos and Sora aren't installed"));
         assert!(f(&["A", "B", "C"]).unwrap().starts_with("A, B and C aren't"));
         assert!(f(&["A", "B", "C", "D", "E"]).unwrap().starts_with("A, B, C and 2 more aren't"));
+    }
+
+    #[test]
+    fn missing_font_toast_is_dismissible_once_per_opened_presentation() {
+        use egui_kittest::{Harness, kittest::Queryable};
+        use serde_json::json;
+
+        let mut app = SlideApp::new(deckcraft_engine::Session::with_new(), crate::Services::default());
+        app.ui.language = "vi".into();
+        let mut h = Harness::builder().with_size(vec2(1280.0, 800.0)).build_ui_state(
+            |ui, app: &mut SlideApp| {
+                app.logic(ui.ctx());
+                app.ui(ui);
+            },
+            app,
+        );
+        h.run_steps(2);
+        let bytes = deckcraft_engine::cmd::file::save_bytes(&deckcraft_model::defaults::new_presentation(None), "pptx").unwrap();
+        let params = json!({"name": "fonts.pptx", "data": deckcraft_engine::cmd::base64_encode(&bytes)});
+        h.state_mut().run("file.openBytes", params.clone()).unwrap();
+        let fonts: Vec<String> = ["Missing Alpha", "Missing Beta", "Missing Gamma", "Missing Delta", "Missing Epsilon"].map(String::from).into();
+        h.state_mut().session.active_mut().unwrap().missing_fonts = fonts.clone();
+        let first = h.state().session.active_index().unwrap();
+        h.run_steps(2);
+        let text = h.state().toast.as_ref().unwrap().text.clone();
+        assert!(text.starts_with("Missing Alpha, Missing Beta, Missing Gamma và 2 khác"), "{text}");
+        assert!(!text.contains("Missing Delta"));
+        assert!(!text.contains("Missing Epsilon"));
+        h.get_by_label("Close").click();
+        h.run_steps(2);
+        assert!(h.state().toast.is_none());
+        h.state_mut().session.set_active(0);
+        h.run_steps(2);
+        h.state_mut().session.set_active(first);
+        h.run_steps(2);
+        assert!(h.state().toast.is_none());
+        h.state_mut().run("file.openBytes", params).unwrap();
+        h.state_mut().session.active_mut().unwrap().missing_fonts = fonts;
+        h.run_steps(2);
+        assert!(h.state().toast.is_some(), "a separate opening has its own notice");
     }
 }
