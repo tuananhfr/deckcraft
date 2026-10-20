@@ -51,7 +51,7 @@ pub fn ui_shortcut(app: &mut SlideApp, key: egui::Key, m: Mods) -> bool {
     let Some(id) = ui_shortcut_command(key, m) else { return false };
     match id {
         // Save writes through the host (a download on the web), which `file.save` alone can't.
-        "file.save" => app.save(),
+        "file.save" => app.request_save(),
         "app.backstage" => {
             app.open_backstage(crate::backstage::Page::Home);
             if let Some(b) = app.backstage.as_mut() {
@@ -161,6 +161,7 @@ pub fn menu_tree() -> Vec<(&'static str, Vec<(&'static str, &'static str)>)> {
                 ("Open…", "app.openDialog"),
                 ("-", ""),
                 ("Close", "app.closePresentation"),
+                ("Reopen Closed Presentation", "file.reopenClosed"),
                 ("Save", "file.save"),
                 ("Save As…", "app.saveAsDialog"),
                 ("Export…", "app.exportDialog"),

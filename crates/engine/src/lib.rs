@@ -7,6 +7,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+pub mod closed;
 pub mod cmd;
 pub mod connect;
 pub mod fonts;
@@ -373,6 +374,8 @@ pub struct Session {
     /// ends) instead of Windows and Linux (Ctrl+arrows by word or paragraph). Defaults to the
     /// platform DeckCraft was built for.
     pub mac_keys: bool,
+    /// Presentations closed in this session, for `file.reopenClosed`.
+    pub closed: closed::ClosedDocs,
 }
 
 impl Default for Session {
@@ -401,6 +404,7 @@ impl Session {
             media_status: Default::default(),
             gif_paused: Default::default(),
             mac_keys: cfg!(target_os = "macos"),
+            closed: Default::default(),
         }
     }
     /// A session with one new presentation open.
@@ -453,10 +457,12 @@ impl Session {
         self.active = Some(i);
         Ok(i)
     }
-    /// Closing another presentation keeps the active one active.
+    /// Closing another presentation keeps the active one active. The closed one is kept for
+    /// `file.reopenClosed`.
     pub fn close_document(&mut self, i: usize) {
         if i < self.docs.len() {
             let d = self.docs.remove(i);
+            self.closed.record(&d);
             if let Some(dir) = &self.recovery_dir {
                 recovery::discard(dir, d.uid);
             }

@@ -28,6 +28,15 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!(query "file.render", "Render Slide", [], None, "{slide?: index, scale?, edit?: bool} → {png: base64, width, height}", has_doc, render),
         cmd!(noundo "file.close", "Close", ["File"], Some("Cmd+W"), "{index?: document, else the active one}", has_doc, close),
         cmd!(
+            noundo "file.reopenClosed",
+            "Reopen Closed Presentation",
+            ["File"],
+            Some("Cmd+Shift+T"),
+            "{} → {document, title, unsaved}",
+            has_closed,
+            reopen_closed
+        ),
+        cmd!(
             "file.properties",
             "Properties",
             ["File"],
@@ -363,6 +372,26 @@ fn close(s: &mut Session, p: &Value) -> Result<Value> {
         s.close_document(i);
     }
     ok()
+}
+
+fn has_closed(s: &Session) -> std::result::Result<(), String> {
+    if s.closed.is_empty() { Err("no closed presentation to reopen".into()) } else { Ok(()) }
+}
+
+/// Reopens the most recently closed presentation as it was closed: its title and file, and
+/// unsaved if it had unsaved changes. Refused by the open-documents limit, it stays to reopen.
+fn reopen_closed(s: &mut Session, _p: &Value) -> Result<Value> {
+    s.ensure_room()?;
+    let c = s.closed.pop().ok_or_else(|| EngineError::Other("no closed presentation to reopen".into()))?;
+    let mut doc = deckcraft_format::load(&c.bytes).map_err(|e| EngineError::Other(format!("{}: {e}", c.title)))?;
+    deckcraft_format::repair(&mut doc);
+    let mut st = DocState::new(doc, c.path, c.title.clone());
+    if c.unsaved {
+        st.saved_doc = std::sync::Arc::new((*st.doc).clone());
+        st.revision += 1;
+    }
+    let i = s.add_document(st)?;
+    Ok(json!({"document": i, "title": c.title, "unsaved": c.unsaved}))
 }
 
 fn properties(s: &mut Session, p: &Value) -> Result<Value> {

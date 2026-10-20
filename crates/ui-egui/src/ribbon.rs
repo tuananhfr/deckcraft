@@ -54,7 +54,8 @@ pub fn title_bar(app: &mut SlideApp, ui: &mut Ui) {
         undo_button(app, &mut child);
         redo_button(app, &mut child);
         play_from_start_button(app, &mut child);
-        ui.painter().text(rect.center(), Align2::CENTER_CENTER, document_title(app), theme::font(13.0), t.text);
+        let shown = ui.painter().text(rect.center(), Align2::CENTER_CENTER, document_title(app), theme::font(13.0), t.text);
+        save_failure_tip(app, ui, shown);
         // Right side.
         let mut right = ui.new_child(
             egui::UiBuilder::new()
@@ -119,13 +120,35 @@ fn narrow_title_bar(app: &mut SlideApp, ui: &mut Ui, rect: Rect) {
     }
     let gap = Rect::from_min_max(pos2(left_end + TITLE_MARGIN, rect.min.y), pos2(rui.min_rect().min.x - TITLE_MARGIN, rect.max.y));
     let title = document_title(app);
-    if let Some(g) = crate::narrow::elide(ui, &title, theme::font(13.0), t.text, gap.width()) {
-        let at = pos2(gap.center().x - g.size().x / 2.0, gap.center().y - g.size().y / 2.0);
-        let shown = Rect::from_min_size(at, g.size()).intersect(gap);
-        ui.interact(shown, ui.id().with("doc_title"), Sense::hover())
-            .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &title));
-        ui.painter().with_clip_rect(gap).galley(at, g, t.text);
+    let font = theme::font(13.0);
+    // "Saving…" and "Save failed" stay readable: the name is shortened first.
+    let saving = app.session.active().and_then(|d| Some((d.title(), app.save_state(d.uid)?)));
+    let (name, mut state) = match &saving {
+        Some((name, s)) => (name.clone(), crate::narrow::elide(ui, &format!(" — {}", s.label()), font.clone(), t.text, gap.width())),
+        None => (title.clone(), None),
+    };
+    let state_w = state.as_ref().map_or(0.0, |g| g.size().x);
+    let name = crate::narrow::elide(ui, &name, font.clone(), t.text, gap.width() - state_w);
+    if name.is_none()
+        && let Some((_, s)) = &saving
+    {
+        // No room for the name: the state alone, without the dash that would join it.
+        state = crate::narrow::elide(ui, s.label(), font, t.text, gap.width());
     }
+    let state_w = state.as_ref().map_or(0.0, |g| g.size().x);
+    let w = name.as_ref().map_or(0.0, |g| g.size().x) + state_w;
+    let Some(h) = name.as_ref().or(state.as_ref()).map(|g| g.size().y) else { return };
+    let at = pos2(gap.center().x - w / 2.0, gap.center().y - h / 2.0);
+    let shown = Rect::from_min_size(at, vec2(w, h)).intersect(gap);
+    ui.interact(shown, ui.id().with("doc_title"), Sense::hover()).widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &title));
+    let p = ui.painter().with_clip_rect(gap);
+    let mut x = at.x;
+    for g in [name, state].into_iter().flatten() {
+        let gw = g.size().x;
+        p.galley(pos2(x, at.y), g, t.text);
+        x += gw;
+    }
+    save_failure_tip(app, ui, shown);
 }
 
 /// An icon button known by its tooltip to screen readers and tests.
@@ -134,12 +157,29 @@ fn named(resp: egui::Response, tip: &str) -> egui::Response {
     resp
 }
 
-fn document_title(app: &SlideApp) -> String {
-    let dirty = app.session.active().is_some_and(|d| d.is_dirty());
-    app.session
-        .active()
-        .map(|d| format!("{}{}", d.title(), if dirty { format!(" — {}", crate::tl!("Edited")) } else { String::new() }))
-        .unwrap_or_else(|| "DeckCraft".into())
+/// The presentation's name and where saving it stands: "Saving…", "Save failed" or "Edited".
+pub(crate) fn document_title(app: &SlideApp) -> String {
+    let Some(d) = app.session.active() else { return "DeckCraft".into() };
+    let state = match app.save_state(d.uid) {
+        Some(s) => Some(s.label()),
+        None if d.is_dirty() => Some(crate::tl!("Edited")),
+        None => None,
+    };
+    match state {
+        Some(state) => format!("{} — {state}", d.title()),
+        None => d.title(),
+    }
+}
+
+/// Why the save failed, on hovering the title, or in a notice on a click or tap (touch has no
+/// hover, and a phone's status bar would cut it short).
+fn save_failure_tip(app: &mut SlideApp, ui: &Ui, shown: Rect) {
+    let Some(text) = app.session.active().and_then(|d| app.save_failure_text(d.uid)) else { return };
+    let r = ui.interact(shown, ui.id().with("save_failure"), Sense::click());
+    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &text));
+    if r.on_hover_text(&text).clicked() {
+        app.toast = Some(crate::toast::Toast { text, at: crate::now_ms() });
+    }
 }
 
 fn home_button(app: &mut SlideApp, ui: &mut Ui) {
@@ -150,7 +190,7 @@ fn home_button(app: &mut SlideApp, ui: &mut Ui) {
 
 fn save_button(app: &mut SlideApp, ui: &mut Ui) {
     if named(icon_toggle(ui, Icon::Save, "Save (⌘S)", app.session.active().is_some(), false), "Save (⌘S)").clicked() {
-        app.save();
+        app.request_save();
     }
 }
 

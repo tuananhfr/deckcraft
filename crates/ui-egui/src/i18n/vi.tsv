@@ -254,6 +254,8 @@
 	Clock	Đồng hồ
 	Clockwise	Theo chiều Kim đồng hồ
 	Close	Đóng
+	Close All	Đóng tất cả
+	Close Others	Đóng các tài liệu khác
 	Close\nMaster View	Đóng\nDạng xem Cái
 	Close Master View	Đóng Dạng xem Cái
 	Close {name}	Đóng {name}
@@ -267,6 +269,7 @@
 	Columns	Cột
 	Comb	Răng lược
 	Combine	Kết hợp
+	command `file.reopenClosed` is not available right now: no closed presentation to reopen	Không có tài liệu vừa đóng nào để mở lại
 	Command Palette	Bảng Lệnh
 	Comment	Chú thích
 	Comments	Chú thích
@@ -394,6 +397,7 @@
 	Division Sign	Dấu Chia
 	divot	lõm
 	Do not Autofit	Không Tự động Khớp
+	Do you want to save the changes to these presentations?	Bạn có muốn lưu các thay đổi trong các bản trình bày này không?
 	Do you want to save the changes you made to {what}?	Bạn có muốn lưu các thay đổi trong {what} không?
 	Document	Tài liệu
 	document	tài liệu
@@ -821,6 +825,7 @@
 	Next Window	Cửa sổ Tiếp theo
 	Next ▶	Tiếp ▶
 	No accessibility issues found. People with disabilities should not have difficulty reading this document.	Không tìm thấy vấn đề trợ năng nào. Người khuyết tật sẽ không gặp khó khăn khi đọc tài liệu này.
+	no closed presentation to reopen	Không có tài liệu vừa đóng nào để mở lại
 	No Color	Không Màu
 	No comments on this slide.	Trang chiếu này không có chú thích.
 	No contributor data was built into this copy.	Bản này không được tích hợp dữ liệu người đóng góp.
@@ -1038,6 +1043,7 @@
 	Rename Slide	Đổi tên Trang chiếu
 	Render Slide	Kết xuất Trang chiếu
 	Reopen	Mở lại
+	Reopen Closed Presentation	Mở lại tài liệu vừa đóng
 	Reorder Animation	Sắp xếp lại Hoạt hình
 	Reorder Objects	Sắp xếp lại Đối tượng
 	Replace	Thay thế
@@ -1099,14 +1105,18 @@
 	Saturation {value}%	Độ bão hòa {value}%
 	Save	Lưu
 	Save (⌘S)	Lưu (⌘S)
+	Save All	Lưu tất cả
 	Save As	Lưu Như
 	Save as Template…	Lưu làm Mẫu…
 	Save As…	Lưu Như…
 	Save AutoRecover Information	Lưu Thông tin Tự Phục hồi
+	Save failed	Lưu không thành công
 	Save to Data	Lưu vào Dữ liệu
+	Save {name}	Lưu {name}
 	Saved	Đã lưu
 	Saved {path}	Đã lưu {path}
 	Saving a copy needs a file picker, which this window doesn't have.	Lưu bản sao cần có hộp chọn tệp, nhưng cửa sổ này không có.
+	Saving…	Đang lưu…
 	Scatter	Phân tán
 	Screenshot	Ảnh chụp Màn hình
 	Screenshot (not available yet)	Ảnh chụp Màn hình (chưa khả dụng)

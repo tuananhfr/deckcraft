@@ -62,7 +62,8 @@ pub fn show(app: &mut SlideApp, ctx: &egui::Context) {
             .inner_margin(Margin::symmetric(14, 10))
             .shadow(egui::epaint::Shadow { offset: [0, 2], blur: 8, spread: 0, color: t.shadow })
             .show(ui, |ui| {
-                ui.set_max_width(520.0);
+                // A phone's window is narrower than the notice's usual width; keep a 16-point gutter.
+                ui.set_max_width((ctx.content_rect().width() - 2.0 * 16.0 - 2.0 * 14.0).clamp(120.0, 520.0));
                 ui.horizontal(|ui| {
                     ui.add(egui::Label::new(egui::RichText::new(crate::tl!(&text)).font(theme::font(13.0)).color(t.text)).wrap());
                     let (r, resp) = ui.allocate_exact_size(vec2(20.0, 20.0), egui::Sense::click());

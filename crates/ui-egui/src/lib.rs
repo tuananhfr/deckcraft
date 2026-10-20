@@ -8,6 +8,7 @@
 
 pub mod backstage;
 pub mod canvas;
+pub mod close_many;
 pub mod control;
 pub mod credits;
 pub mod dialogs;
@@ -23,6 +24,7 @@ pub mod menus;
 pub mod narrow;
 pub mod panes;
 pub mod ribbon;
+pub mod save_state;
 pub mod selpane;
 pub mod shortcuts;
 pub mod show;
@@ -195,6 +197,8 @@ pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
     ("app.home", "Home", None, "{on?}"),
     ("app.backstage", "File", Some("Alt+F"), "{page?: home|new|open|info|saveAs|print|export|account, on?: bool}"),
     ("app.closePresentation", "Close", Some("Cmd+W"), "{}"),
+    ("app.closeAll", "Close All", None, "{}"),
+    ("app.closeOthers", "Close Others", None, "{index?: the one kept, else the active one}"),
     ("app.print", "Print", Some("Cmd+P"), "{layout?, perPage?, slides?, includeHidden?, frame?}"),
     ("app.about", "About DeckCraft", None, "{}"),
     ("app.palette", "Command Palette", Some("Cmd+Shift+P"), "{}"),
@@ -281,6 +285,10 @@ pub struct SlideApp {
     pub layout: narrow::NarrowLayout,
     pub touch: touch::TouchInput,
     pub(crate) canvas_touch: touch::CanvasTouch,
+    /// Close All, Close Others or quitting, while its prompt is open.
+    pub(crate) close_batch: Option<close_many::CloseBatch>,
+    /// Saving and failed saves, for the title bar.
+    pub(crate) save_status: save_state::SaveStatus,
 }
 
 /// A save the host hasn't finished: the presentation as it was written, by document uid.
@@ -337,6 +345,8 @@ impl SlideApp {
             layout: Default::default(),
             touch: Default::default(),
             canvas_touch: Default::default(),
+            close_batch: None,
+            save_status: Default::default(),
         }
     }
 
@@ -636,6 +646,14 @@ impl SlideApp {
                 return Ok(json!({"page": page.id()}));
             }
             "app.closePresentation" => self.close_presentation(),
+            "app.closeAll" => self.close_all(),
+            "app.closeOthers" => {
+                let keep = match p.get("index").and_then(Value::as_u64) {
+                    Some(i) => self.session.documents().get(i as usize).map(|d| d.uid).ok_or("no document at `index`")?,
+                    None => self.session.active().map(|d| d.uid).ok_or("no presentation open")?,
+                };
+                self.close_others(keep);
+            }
             "app.print" => {
                 if self.session.active().is_none() {
                     return Err("nothing to print: no presentation is open".into());
@@ -723,6 +741,7 @@ impl SlideApp {
     }
 
     pub fn save_as_dialog(&mut self, format: &str) {
+        let Some(uid) = self.session.active().map(|d| d.uid) else { return };
         let name = self.session.active().map(|d| d.title()).unwrap_or_else(|| "Presentation".into());
         let ext = if format == "pptx" { "pptx" } else { "deckcraft" };
         let suggested = format!("{name}.{ext}");
@@ -733,12 +752,16 @@ impl SlideApp {
                         self.set_status(crate::i18n::fmt(crate::tl!("Saved {path}"), &[("path", path.as_str())]));
                         self.ui.recent.retain(|p| *p != path);
                         self.ui.recent.insert(0, path);
+                        self.note_saved(uid);
                     }
-                    Err(e) => self.set_status(e.to_string()),
+                    Err(e) => {
+                        self.note_save_failed(uid, &e.to_string());
+                        self.set_status(e.to_string());
+                    }
                 }
             }
         } else if let Some(save) = self.services.save_file.as_mut()
-            && let Some((uid, doc)) = self.session.active().map(|d| (d.uid, d.doc.clone()))
+            && let Some(doc) = self.session.active().map(|d| d.doc.clone())
         {
             match deckcraft_engine::cmd::file::save_bytes(&doc, ext) {
                 Ok(bytes) => {
@@ -758,7 +781,10 @@ impl SlideApp {
                     // A host that downloads at once has already reported back.
                     self.settle_saves();
                 }
-                Err(e) => self.set_status(e.to_string()),
+                Err(e) => {
+                    self.note_save_failed(uid, &e.to_string());
+                    self.set_status(e.to_string());
+                }
             }
         } else if let Some(dl) = self.services.download.as_mut()
             && let Some(d) = self.session.active_mut()
@@ -769,8 +795,12 @@ impl SlideApp {
                     // The browser never says whether the download finished; without this the tab
                     // would warn about unsaved changes the user just downloaded, forever.
                     d.saved_doc = d.doc.clone();
+                    self.note_saved(uid);
                 }
-                Err(e) => self.set_status(e.to_string()),
+                Err(e) => {
+                    self.note_save_failed(uid, &e.to_string());
+                    self.set_status(e.to_string());
+                }
             }
         }
     }
@@ -786,10 +816,18 @@ impl SlideApp {
             let Some(i) = self.pending_saves.iter().position(|p| p.id == id) else { continue };
             let p = self.pending_saves.remove(i);
             match outcome {
-                SaveOutcome::Saved => self.mark_saved(p.uid, p.written),
+                SaveOutcome::Saved => {
+                    self.mark_saved(p.uid, p.written);
+                    self.note_saved(p.uid);
+                }
                 SaveOutcome::Cancelled => {}
-                SaveOutcome::Failed(e) => self
-                    .set_status(crate::i18n::fmt(crate::tl!("Couldn't save {name}: {error}"), &[("name", p.name.as_str()), ("error", e.as_str())])),
+                SaveOutcome::Failed(e) => {
+                    self.note_save_failed(p.uid, &e);
+                    self.set_status(crate::i18n::fmt(
+                        crate::tl!("Couldn't save {name}: {error}"),
+                        &[("name", p.name.as_str()), ("error", e.as_str())],
+                    ));
+                }
             }
         }
     }
@@ -845,10 +883,17 @@ impl SlideApp {
     }
 
     pub fn save(&mut self) {
-        if self.session.active().and_then(|d| d.path.clone()).is_some() {
+        let Some((uid, path)) = self.session.active().map(|d| (d.uid, d.path.clone())) else { return };
+        if path.is_some() {
             match self.session.execute("file.save", &json!({})) {
-                Ok(_) => self.set_status(crate::tl!("Saved")),
-                Err(e) => self.set_status(e.to_string()),
+                Ok(_) => {
+                    self.note_saved(uid);
+                    self.set_status(crate::tl!("Saved"));
+                }
+                Err(e) => {
+                    self.note_save_failed(uid, &e.to_string());
+                    self.set_status(e.to_string());
+                }
             }
         } else {
             self.save_as_dialog(self.default_save_format());
@@ -950,6 +995,8 @@ impl SlideApp {
         self.last_time = now;
         self.drain_control(ctx);
         self.settle_saves();
+        self.run_queued_save(ctx);
+        self.prune_save_failures();
         if self.fonts_ready {
             self.drain_inbox();
         }
@@ -961,12 +1008,13 @@ impl SlideApp {
         }
         self.collect_screenshots(ctx);
         self.issue_screenshots(ctx);
-        // Closing the window with unsaved changes asks first.
+        // Closing the window with unsaved changes asks first, once for all of them.
         if ctx.input(|i| i.viewport().close_requested()) && !self.quit_confirmed && self.session.documents().iter().any(|d| d.is_dirty()) {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             self.show = None;
-            if self.dialog.as_ref().is_none_or(|d| d.id != "quit") {
-                self.dialog = Some(dialogs::Dialog::new("quit"));
+            if self.dialog.as_ref().is_none_or(|d| d.id != close_many::DIALOG) {
+                let all = self.session.documents().iter().map(|d| d.uid).collect();
+                self.close_documents(all, close_many::After::Quit);
             }
         }
         // AutoRecover: unsaved presentations are written to the recovery folder periodically.
@@ -1072,9 +1120,9 @@ impl SlideApp {
                     if backstage::key(self, key, mods) || !(mods.cmd || mods.alt || f1) || menus::ui_shortcut(self, key, mods) {
                         continue;
                     }
-                    // Engine shortcuts that don't touch the hidden slide (Ctrl+N).
+                    // Engine shortcuts that don't touch the hidden slide (Ctrl+N, Ctrl+Shift+T).
                     if mods.cmd
-                        && matches!(key, egui::Key::N)
+                        && (matches!(key, egui::Key::N) || (key == egui::Key::T && mods.shift))
                         && let Err(e) = self.session.key(key_name(key), mods)
                     {
                         self.note_refusal(&e);
@@ -1162,6 +1210,7 @@ impl SlideApp {
         self.sync_backstage();
         self.sync_doc_view();
         ribbon::title_bar(self, ui);
+        self.saving_shown(&ctx);
         if self.backstage.is_none() && self.session.active().is_some() {
             doctabs::show(self, ui);
             ribbon::show(self, ui);
@@ -1370,6 +1419,9 @@ mod prompt_tests;
 
 #[cfg(test)]
 mod status_tests;
+
+#[cfg(test)]
+mod closing_tests;
 
 #[cfg(test)]
 mod tests {

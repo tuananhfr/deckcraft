@@ -576,6 +576,22 @@ fn recent_list(app: &mut SlideApp, ui: &mut Ui, query: &str, limit: usize) {
     }
 }
 
+/// Reopen Closed Presentation (Ctrl+Shift+T), naming the one it brings back; disabled when nothing
+/// was closed. After closing the last presentation this is the start screen, where it is needed.
+fn reopen_closed_button(app: &mut SlideApp, ui: &mut Ui) {
+    let last = app.session.closed.last().map(|c| c.title.clone());
+    let button = egui::Button::new(crate::tl!("Reopen Closed Presentation"));
+    let r = ui.add_enabled(last.is_some(), button);
+    let keys = crate::ribbon::pretty_shortcut("Cmd+Shift+T");
+    let r = match &last {
+        Some(name) => r.on_hover_text(format!("“{name}” ({keys})")),
+        None => r.on_disabled_hover_text(keys),
+    };
+    if r.clicked() {
+        let _ = app.run("file.reopenClosed", json!({}));
+    }
+}
+
 /// A large square command button (Print, Create PDF, Check for Issues…).
 fn square_button(ui: &mut Ui, icon: Icon, label: &str, enabled: bool) -> egui::Response {
     let t = Tokens::get(ui.ctx());
@@ -656,6 +672,8 @@ fn home(app: &mut SlideApp, ui: &mut Ui, bs: &mut Backstage, out: &mut Outcome) 
     });
     ui.add_space(6.0);
     recent_list(app, ui, &bs.query.clone(), 8);
+    ui.add_space(6.0);
+    reopen_closed_button(app, ui);
     if app.ui.recent.len() > 8 {
         ui.add_space(6.0);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Min), |ui| {
@@ -696,6 +714,8 @@ fn open_page(app: &mut SlideApp, ui: &mut Ui, bs: &mut Backstage) {
             {
                 let _ = app.run("app.openDialog", json!({}));
             }
+            ui.add_space(12.0);
+            reopen_closed_button(app, ui);
             if app.session.recovery_dir.is_some() {
                 ui.add_space(24.0);
                 if ui.button(crate::tl!("Recover Unsaved Presentations")).clicked() {

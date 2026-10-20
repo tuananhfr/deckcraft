@@ -56,7 +56,6 @@ fn title(id: &str) -> &'static str {
         "trim" => "Trim Media",
         "smartart" => "Choose a SmartArt Graphic",
         "shortcuts" => "Keyboard Shortcuts",
-        "quit" => "DeckCraft",
         _ => "DeckCraft",
     }
 }
@@ -77,6 +76,9 @@ pub fn show(app: &mut SlideApp, ctx: &egui::Context) {
         });
     if open && !close && !ctx.input(|i| i.key_pressed(egui::Key::Escape)) {
         app.dialog = Some(d);
+    } else if d.id == crate::close_many::DIALOG {
+        // Esc or the window's ×: the same as Cancel.
+        app.close_batch = None;
     }
 }
 
@@ -127,6 +129,7 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
     };
     match d.id.as_str() {
         "shortcuts" => crate::shortcuts::body(app, ui, d),
+        crate::close_many::DIALOG => crate::close_many::body(app, ui, d),
         "table" => {
             field(ui, d, "Number of columns:", "cols", "5");
             field(ui, d, "Number of rows:", "rows", "2");
@@ -260,50 +263,6 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
                 run(app, "show.setup", json!({"type": ty, "loop": lp, "noNarration": nn, "noAnimation": na, "useTimings": ut}));
             }
             ok || cancel
-        }
-        "quit" => {
-            let names: Vec<String> = app.session.documents().iter().filter(|d| d.is_dirty()).map(|d| d.title()).collect();
-            if names.is_empty() {
-                app.quit_confirmed = true;
-                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
-                return true;
-            }
-            let what = if names.len() == 1 {
-                format!("“{}”", names[0])
-            } else {
-                crate::i18n::fmt(crate::tl!("{n} presentations"), &[("n", &names.len().to_string())])
-            };
-            ui.label(
-                egui::RichText::new(crate::i18n::fmt(crate::tl!("Do you want to save the changes you made to {what}?"), &[("what", &what)])).strong(),
-            );
-            ui.label(crate::tl!("Your changes will be lost if you don't save them."));
-            ui.add_space(8.0);
-            let mut done = false;
-            ui.horizontal(|ui| {
-                let t = Tokens::get(ui.ctx());
-                if ui.add(egui::Button::new(crate::tl!("Don't Save")).min_size(vec2(84.0, 24.0))).clicked() {
-                    let _ = app.session.execute("file.recovery.discard", &json!({}));
-                    app.quit_confirmed = true;
-                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
-                    done = true;
-                }
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let save = ui.add(
-                        egui::Button::new(egui::RichText::new(crate::tl!("Save")).color(t.accent_text)).fill(t.accent).min_size(vec2(72.0, 24.0)),
-                    );
-                    if save.clicked() || ui.input(|i| i.key_pressed(egui::Key::Enter)) {
-                        if app.save_all() {
-                            app.quit_confirmed = true;
-                            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
-                        }
-                        done = true;
-                    }
-                    if ui.add(egui::Button::new(crate::tl!("Cancel")).min_size(vec2(72.0, 24.0))).clicked() {
-                        done = true;
-                    }
-                });
-            });
-            done
         }
         "close" => {
             // File › Close, Ctrl+W or a document tab's × on a presentation with unsaved changes.

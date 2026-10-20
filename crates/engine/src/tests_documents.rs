@@ -159,3 +159,86 @@ fn only_a_placeholder_blank_is_replaced() {
     s.execute("file.new", &json!({})).unwrap();
     assert_eq!(titles(&s), ["Presentation2"], "the start blank gives way to a new one too");
 }
+
+fn reopen(s: &mut Session) -> Result<serde_json::Value> {
+    s.execute("file.reopenClosed", &json!({}))
+}
+
+#[test]
+fn a_presentation_closed_without_saving_reopens_with_its_changes_unsaved() {
+    let mut s = Session::new();
+    s.execute("file.new", &json!({})).unwrap();
+    s.execute("file.new", &json!({})).unwrap();
+    s.execute("slide.new", &json!({"layout": "blank"})).unwrap();
+    assert!(s.doc().unwrap().is_dirty());
+    assert!(reopen(&mut s).is_err(), "nothing closed yet");
+    s.execute("file.close", &json!({})).unwrap();
+    assert_eq!(titles(&s), ["Presentation1"]);
+    assert_eq!(s.closed.last().map(|c| (c.title.as_str(), c.unsaved)), Some(("Presentation2", true)));
+
+    let v = reopen(&mut s).unwrap();
+    assert_eq!(v, json!({"document": 1, "title": "Presentation2", "unsaved": true}));
+    assert_eq!(titles(&s), ["Presentation1", "Presentation2"]);
+    let d = s.doc().unwrap();
+    assert_eq!(d.doc.slides.len(), 2, "the slide added before closing came back");
+    assert!(d.is_dirty(), "and is still unsaved");
+    assert!(s.closed.is_empty());
+    assert!(reopen(&mut s).is_err());
+}
+
+#[test]
+fn a_saved_presentation_reopens_saved_with_its_file() {
+    let path = std::env::temp_dir().join(format!("deckcraft-reopen-{}.deckcraft", std::process::id()));
+    let mut s = Session::new();
+    s.execute("file.new", &json!({})).unwrap();
+    s.execute("slide.new", &json!({})).unwrap();
+    s.execute("file.saveAs", &json!({"path": path.to_string_lossy()})).unwrap();
+    let title = s.doc().unwrap().title();
+    s.execute("file.close", &json!({})).unwrap();
+    assert!(s.active().is_none());
+    reopen(&mut s).unwrap();
+    let d = s.doc().unwrap();
+    assert_eq!(d.title(), title);
+    assert_eq!(d.path.as_deref(), Some(path.to_string_lossy().as_ref()), "Save writes to the same file again");
+    assert!(!d.is_dirty());
+    let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn reopening_goes_most_recent_first_and_keeps_to_the_limit() {
+    let mut s = full();
+    s.close_document(2);
+    s.close_document(0);
+    assert_eq!(s.closed.len(), 2);
+    s.execute("file.new", &json!({})).unwrap();
+    s.execute("file.new", &json!({})).unwrap();
+    assert!(refused(reopen(&mut s)), "the limit holds");
+    assert_eq!(s.closed.last().map(|c| c.title.as_str()), Some("Presentation1"), "the refused one stays to reopen");
+    s.close_document(9);
+    reopen(&mut s).unwrap();
+    assert_eq!(s.doc().unwrap().title(), "Presentation12", "the most recently closed comes back first");
+    for _ in 0..3 {
+        s.close_document(0);
+    }
+    for _ in 0..3 {
+        reopen(&mut s).unwrap();
+    }
+    let back: Vec<String> = titles(&s).into_iter().rev().take(3).collect();
+    assert_eq!(back, ["Presentation2", "Presentation4", "Presentation5"], "newest closed first");
+    assert_eq!(s.closed.last().map(|c| c.title.as_str()), Some("Presentation1"));
+}
+
+#[test]
+fn an_untouched_sample_is_not_kept_and_ctrl_shift_t_reopens() {
+    let mut s = Session::new();
+    sample::open_sample(&mut s).unwrap();
+    s.execute("file.close", &json!({})).unwrap();
+    assert!(s.closed.is_empty(), "closing the untouched sample loses nothing");
+    s.execute("file.new", &json!({})).unwrap();
+    let title = s.doc().unwrap().title();
+    s.execute("file.close", &json!({})).unwrap();
+    // With nothing open, the key still reaches the command.
+    let v = s.key("T", Mods { shift: true, alt: false, cmd: true }).unwrap();
+    assert_eq!(v["command"], "file.reopenClosed", "{v}");
+    assert_eq!(titles(&s), [title]);
+}
