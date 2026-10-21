@@ -1,5 +1,6 @@
 # ERPCons changes
 
+- Default apps (Windows): list Trình chiếu – ERPCons in Settings > Default apps for .deckcraft, .pptx, .potx and .ppsx; it still owns only .deckcraft and never takes over PowerPoint formats.
 - Desktop installers (desktop): build unsigned Windows, ad-hoc signed universal macOS and Linux packages in GitHub Actions; publish fixed download names and checksums for validated ERPCons version tags.
 - ERPCons branding (desktop): use Trình chiếu – ERPCons, isolated ERPCons/TrinhChieu storage, ERPCons icons and installer identities; preserve web branding and binary names.
 

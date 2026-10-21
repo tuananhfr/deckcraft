@@ -61,6 +61,16 @@
           </Extension>
         </ProgId>
 
+        <!-- Settings > Default apps: lets the user pick Trình chiếu – ERPCons for these types. -->
+        <RegistryValue Root="HKLM" Key="Software\ERPCons\TrinhChieu\Capabilities" Name="ApplicationName" Value="Trình chiếu – ERPCons" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\ERPCons\TrinhChieu\Capabilities" Name="ApplicationDescription" Value="Create and edit presentations and slide shows." Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\ERPCons\TrinhChieu\Capabilities" Name="ApplicationIcon" Value="&quot;[#DeckcraftExe]&quot;,0" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\ERPCons\TrinhChieu\Capabilities\FileAssociations" Name=".deckcraft" Value="ERPCons.TrinhChieu.deckcraft" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\ERPCons\TrinhChieu\Capabilities\FileAssociations" Name=".pptx" Value="ERPCons.TrinhChieu.pptx" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\ERPCons\TrinhChieu\Capabilities\FileAssociations" Name=".potx" Value="ERPCons.TrinhChieu.potx" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\ERPCons\TrinhChieu\Capabilities\FileAssociations" Name=".ppsx" Value="ERPCons.TrinhChieu.ppsx" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\RegisteredApplications" Name="Trình chiếu – ERPCons" Value="Software\ERPCons\TrinhChieu\Capabilities" Type="string" />
+
         <!-- "Open with" for PowerPoint formats, without becoming the default. -->
         <RegistryValue Root="HKLM" Key="Software\Classes\Applications\deckcraft.exe" Name="FriendlyAppName" Value="Trình chiếu – ERPCons" Type="string" />
         <RegistryValue Root="HKLM" Key="Software\Classes\Applications\deckcraft.exe\shell\open\command" Value="&quot;[#DeckcraftExe]&quot; &quot;%1&quot;" Type="string" />
