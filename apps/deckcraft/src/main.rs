@@ -17,21 +17,36 @@ mod control_server;
 #[cfg(any(target_os = "windows", test))]
 mod graphics;
 mod logging;
+mod settings;
 
 use deckcraft_engine::Session;
 use deckcraft_ui_egui::{Services, SlideApp};
 
-struct App(SlideApp);
+struct App(SlideApp, String);
+
+impl App {
+    fn save_language_change(&mut self) {
+        if self.0.ui.language != self.1
+            && std::env::var_os("DECKCRAFT_NO_PREFS").is_none()
+            && let Some(path) = prefs_path()
+            && let Err(e) = settings::save_language_change(&path, &self.0.ui_state_to_save(), &mut self.1)
+        {
+            log::warn!("save UI language: {e}");
+        }
+    }
+}
 
 impl eframe::App for App {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.0.logic(ctx);
+        self.save_language_change();
     }
     fn raw_input_hook(&mut self, _ctx: &egui::Context, raw: &mut egui::RawInput) {
         self.0.raw_input_hook(raw);
     }
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.0.ui(ui);
+        self.save_language_change();
     }
     fn on_exit(&mut self) {
         save_prefs(&self.0);
@@ -57,15 +72,12 @@ fn prefs_path() -> Option<std::path::PathBuf> {
 }
 
 fn load_prefs(app: &mut SlideApp) {
+    app.ui.language = settings::language(None).into();
     if std::env::var_os("DECKCRAFT_NO_PREFS").is_some() {
         return;
     }
-    if let Some(p) = prefs_path()
-        && let Ok(bytes) = std::fs::read(&p)
-        && let Ok(ui) = serde_json::from_slice::<deckcraft_ui_egui::UiState>(&bytes)
-    {
-        app.ui = ui;
-    }
+    let bytes = prefs_path().and_then(|p| std::fs::read(p).ok());
+    app.ui = settings::load_ui(bytes.as_deref());
     if let Some(p) = prefs_path().map(|p| p.with_file_name("prefs.json"))
         && let Ok(bytes) = std::fs::read(&p)
         && let Ok(prefs) = serde_json::from_slice::<deckcraft_engine::Prefs>(&bytes)
@@ -80,8 +92,8 @@ fn save_prefs(app: &SlideApp) {
     }
     if let Some(p) = prefs_path() {
         let _ = std::fs::create_dir_all(p.parent().unwrap_or(std::path::Path::new(".")));
-        if let Ok(bytes) = serde_json::to_vec_pretty(&app.ui_state_to_save()) {
-            let _ = std::fs::write(&p, bytes);
+        if let Err(e) = settings::save_ui(&p, &app.ui_state_to_save()) {
+            log::warn!("save UI settings: {e}");
         }
         if let Ok(bytes) = serde_json::to_vec_pretty(&app.session.prefs) {
             let _ = std::fs::write(p.with_file_name("prefs.json"), bytes);
@@ -224,7 +236,8 @@ fn main() -> eframe::Result {
             if show {
                 app.start_show(0, false);
             }
-            Ok(Box::new(App(app)))
+            let language = app.ui.language.clone();
+            Ok(Box::new(App(app, language)))
         }),
     )
 }
