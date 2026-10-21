@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
   <mime-type type="application/x-deckcraft">
-    <comment>DeckCraft presentation</comment>
+    <comment>Trình chiếu – ERPCons presentation</comment>
     <sub-class-of type="application/zip"/>
     <glob pattern="*.deckcraft"/>
-    <icon name="ai.storyteller.deckcraft"/>
+    <icon name="vn.erpcons.trinhchieu"/>
   </mime-type>
 </mime-info>

@@ -3,7 +3,7 @@
 # exports VERSION and NFPM_ARCH.
 #
 #   nfpm package -f packaging/linux/nfpm.yaml -p deb -t dist/release/
-name: deckcraft
+name: erpcons-trinhchieu
 arch: ${NFPM_ARCH}
 platform: linux
 version: ${VERSION}
@@ -13,8 +13,8 @@ release: 1
 section: editors
 priority: optional
 maintainer: ${DECKCRAFT_MAINTAINER}
-vendor: Learning Machines LLC
-homepage: https://github.com/tuananhfr/deckcraft
+vendor: ERPCons
+homepage: https://office.erpcons.vn
 license: MIT OR Apache-2.0
 description: |-
   Open-source, native presentation app that works the way PowerPoint users

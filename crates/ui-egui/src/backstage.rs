@@ -517,7 +517,7 @@ fn new_tiles(app: &mut SlideApp, ui: &mut Ui, query: &str, limit: usize, blank: 
             if shown >= limit {
                 break;
             }
-            if tile(ui, &th.name, Some(&th), false).clicked() {
+            if tile(ui, &app.product_label(&th.name), Some(&th), false).clicked() {
                 let _ = app.run("file.new", json!({"theme": th.name}));
             }
             shown += 1;
@@ -649,8 +649,8 @@ fn home(app: &mut SlideApp, ui: &mut Ui, bs: &mut Backstage, out: &mut Outcome) 
     let t = Tokens::get(ui.ctx());
     ui.horizontal(|ui| {
         let (r, _) = ui.allocate_exact_size(vec2(36.0, 36.0), Sense::hover());
-        crate::dialogs::paint_logo(ui.painter(), r);
-        ui.label(RichText::new("DeckCraft").font(theme::bold(24.0)).color(t.text));
+        app.paint_product_logo(ui, r);
+        ui.label(RichText::new(app.product_name).font(theme::bold(24.0)).color(t.text));
     });
     ui.add_space(18.0);
     ui.horizontal(|ui| {
@@ -815,7 +815,7 @@ fn info(app: &mut SlideApp, ui: &mut Ui, bs: &mut Backstage) {
                 for (i, (key, label, hint)) in PROPERTIES.iter().enumerate() {
                     let saved = props.get(*key).and_then(Value::as_str).unwrap_or("").to_string();
                     let Some(draft) = bs.props.get_mut(i) else { continue };
-                    let l = ui.label(RichText::new(crate::tl!(*label)).color(t.text_dim));
+                    let l = ui.label(RichText::new(app.product_text(label)).color(t.text_dim));
                     let id = ui.make_persistent_id(("backstage_prop", *key));
                     // Show the presentation's value unless the field is being edited (undo…).
                     if !ui.ctx().memory(|m| m.has_focus(id)) {
@@ -854,9 +854,9 @@ fn save_as(app: &mut SlideApp, ui: &mut Ui, bs: &mut Backstage, out: &mut Outcom
     ui.add_space(14.0);
     let current = SAVE_TYPES.iter().find(|s| s.0 == bs.file_type).map_or(SAVE_TYPES[0].1, |s| s.1);
     ui.horizontal(|ui| {
-        egui::ComboBox::from_id_salt("backstage_save_type").width(340.0).selected_text(crate::tl!(current)).show_ui(ui, |ui| {
+        egui::ComboBox::from_id_salt("backstage_save_type").width(340.0).selected_text(app.product_text(current)).show_ui(ui, |ui| {
             for (id, label, _) in SAVE_TYPES {
-                if ui.selectable_label(bs.file_type == id, crate::tl!(label)).clicked() {
+                if ui.selectable_label(bs.file_type == id, app.product_text(label)).clicked() {
                     bs.file_type = id;
                 }
             }
@@ -880,7 +880,7 @@ fn save_as(app: &mut SlideApp, ui: &mut Ui, bs: &mut Backstage, out: &mut Outcom
     });
     ui.add_space(8.0);
     if let Some((_, _, detail)) = SAVE_TYPES.iter().find(|s| s.0 == bs.file_type) {
-        dim(ui, crate::tl!(detail));
+        dim(ui, &app.product_text(detail));
     }
 }
 
@@ -945,7 +945,7 @@ fn print(app: &mut SlideApp, ui: &mut Ui, bs: &mut Backstage) {
             ui.add_space(6.0);
             dim(
                 ui,
-                crate::tl!(if app.services.pick_save.is_some() {
+                &app.product_text(if app.services.pick_save.is_some() {
                     "DeckCraft prints through a PDF: it opens in your PDF viewer, where you choose the printer."
                 } else {
                     "DeckCraft prints through a PDF: it downloads, ready to print from your browser or PDF viewer."
@@ -1188,18 +1188,24 @@ fn export(app: &mut SlideApp, ui: &mut Ui, bs: &mut Backstage) {
                     for (id, label, detail) in SAVE_TYPES.iter().filter(|s| s.0 != "pdf") {
                         let selected = bs.file_type == *id;
                         let (rect, resp) = ui.allocate_exact_size(vec2(520.0, 46.0), Sense::click());
-                        resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, *label));
+                        resp.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, selected, app.product_label(label)));
                         let p = ui.painter();
                         if selected {
                             p.rect_filled(rect, CornerRadius::same(2), t.selected);
                         } else if resp.hovered() {
                             p.rect_filled(rect, CornerRadius::same(2), t.hover);
                         }
-                        p.text(pos2(rect.left() + 12.0, rect.center().y - 8.0), Align2::LEFT_CENTER, crate::tl!(*label), theme::font(13.0), t.text);
+                        p.text(
+                            pos2(rect.left() + 12.0, rect.center().y - 8.0),
+                            Align2::LEFT_CENTER,
+                            app.product_text(label),
+                            theme::font(13.0),
+                            t.text,
+                        );
                         p.text(
                             pos2(rect.left() + 12.0, rect.center().y + 9.0),
                             Align2::LEFT_CENTER,
-                            crate::tl!(*detail),
+                            app.product_text(detail),
                             theme::font(11.5),
                             t.text_dim,
                         );
@@ -1249,15 +1255,15 @@ fn account(app: &mut SlideApp, ui: &mut Ui) {
             );
             ui.add_space(16.0);
             heading(ui, "User Information");
-            dim(ui, crate::tl!("DeckCraft has no accounts: there is nothing to sign in to, and your presentations stay on your device."));
+            dim(ui, &app.product_text("DeckCraft has no accounts: there is nothing to sign in to, and your presentations stay on your device."));
         });
         ui.add_space(40.0);
         ui.vertical(|ui| {
             heading(ui, "Product Information");
             ui.horizontal(|ui| {
                 let (r, _) = ui.allocate_exact_size(vec2(40.0, 40.0), Sense::hover());
-                crate::dialogs::paint_logo(ui.painter(), r);
-                ui.label(RichText::new("DeckCraft").font(theme::bold(24.0)).color(t.text));
+                app.paint_product_logo(ui, r);
+                ui.label(RichText::new(app.product_name).font(theme::bold(24.0)).color(t.text));
             });
             dim(ui, &crate::dialogs::version_line());
             dim(ui, crate::tl!("Open source under MIT OR Apache-2.0. Not affiliated with Microsoft."));
@@ -1265,8 +1271,8 @@ fn account(app: &mut SlideApp, ui: &mut Ui) {
             if task(
                 ui,
                 Icon::Help,
-                "About DeckCraft",
-                "About DeckCraft",
+                &app.product_text("About DeckCraft"),
+                &app.product_text("About DeckCraft"),
                 "The version, the people and models who built it, and where to find us.",
                 true,
             ) {

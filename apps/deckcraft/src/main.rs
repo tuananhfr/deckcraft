@@ -57,14 +57,25 @@ impl eframe::App for App {
 /// The per-user settings directory: `ui.json`, `prefs.json` and `logs/` live here.
 fn config_dir() -> Option<std::path::PathBuf> {
     if cfg!(target_os = "macos") {
-        std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join("Library/Application Support/DeckCraft"))
+        std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join("Library/Application Support/ERPCons/TrinhChieu"))
     } else if cfg!(windows) {
-        std::env::var_os("APPDATA").map(|a| std::path::PathBuf::from(a).join("DeckCraft"))
+        std::env::var_os("APPDATA").map(|a| std::path::PathBuf::from(a).join("ERPCons/TrinhChieu"))
     } else {
         std::env::var_os("XDG_CONFIG_HOME")
             .map(std::path::PathBuf::from)
             .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".config")))
-            .map(|c| c.join("deckcraft"))
+            .map(|c| c.join("ERPCons/TrinhChieu"))
+    }
+}
+
+fn recovery_dir() -> Option<std::path::PathBuf> {
+    if cfg!(any(target_os = "macos", target_os = "windows")) {
+        config_dir().map(|d| d.join("Recovery"))
+    } else {
+        std::env::var_os("XDG_DATA_HOME")
+            .map(std::path::PathBuf::from)
+            .or_else(|| std::env::var_os("HOME").map(|h| std::path::PathBuf::from(h).join(".local/share")))
+            .map(|d| d.join("ERPCons/TrinhChieu/recovery"))
     }
 }
 
@@ -123,7 +134,7 @@ fn services() -> Services {
                 "video" => d.add_filter(i18n::t("Video"), &["mp4", "m4v", "mov", "webm", "mkv", "wmv"]),
                 _ => d
                     .add_filter(i18n::t("Presentations"), &["deckcraft", "pptx", "potx", "ppsx", "ppt", "pptm", "odp"])
-                    .add_filter(i18n::t("DeckCraft presentation"), &["deckcraft"])
+                    .add_filter(PRODUCT_NAME, &["deckcraft"])
                     .add_filter("PowerPoint", &["pptx", "potx", "ppsx", "ppt", "pptm"])
                     .add_filter(i18n::t("Outline"), &["txt", "md"]),
             };
@@ -132,8 +143,8 @@ fn services() -> Services {
         pick_save: Some(Box::new(|name: &str| {
             let dialog = rfd::FileDialog::new().set_file_name(name);
             let dialog = match std::path::Path::new(name).extension().and_then(|ext| ext.to_str()) {
-                Some("pptx") => dialog.add_filter("PowerPoint", &["pptx"]).add_filter(i18n::t("DeckCraft presentation"), &["deckcraft"]),
-                Some("deckcraft") => dialog.add_filter(i18n::t("DeckCraft presentation"), &["deckcraft"]).add_filter("PowerPoint", &["pptx"]),
+                Some("pptx") => dialog.add_filter("PowerPoint", &["pptx"]).add_filter(PRODUCT_NAME, &["deckcraft"]),
+                Some("deckcraft") => dialog.add_filter(PRODUCT_NAME, &["deckcraft"]).add_filter("PowerPoint", &["pptx"]),
                 _ => dialog,
             };
             dialog.save_file().map(|p| p.to_string_lossy().to_string())
@@ -165,10 +176,15 @@ fn recovery_message(n: usize) -> String {
     i18n::fmt(template, &[("n", &n.to_string())])
 }
 
-const APP_ID: &str = "ai.storyteller.deckcraft";
+const PRODUCT_NAME: &str = "Trình chiếu – ERPCons";
+const APP_ID: &str = "vn.erpcons.trinhchieu";
+
+fn brand_app(app: &mut SlideApp) {
+    app.product_name = PRODUCT_NAME;
+}
 
 fn app_icon() -> Option<egui::IconData> {
-    let png: &[u8] = include_bytes!("../../../assets/app-icon/hicolor/256x256/apps/ai.storyteller.deckcraft.png");
+    let png: &[u8] = include_bytes!("../../../assets/app-icon/hicolor/256x256/apps/vn.erpcons.trinhchieu.png");
     eframe::icon_data::from_png_bytes(png).map_err(|e| log::warn!("app icon: {e}")).ok()
 }
 
@@ -193,7 +209,7 @@ fn main() -> eframe::Result {
             _ => files.push(a),
         }
     }
-    log::info!("DeckCraft {} ({} {})", env!("CARGO_PKG_VERSION"), std::env::consts::OS, std::env::consts::ARCH);
+    log::info!("{PRODUCT_NAME} {} ({} {})", env!("CARGO_PKG_VERSION"), std::env::consts::OS, std::env::consts::ARCH);
     // The log file lives under the settings directory; opened after the arguments, so `--version`
     // leaves no file behind. Records logged until now are written to it first.
     if let Some(logger) = logger {
@@ -208,7 +224,7 @@ fn main() -> eframe::Result {
     }
     let mut options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_title("DeckCraft")
+            .with_title(PRODUCT_NAME)
             .with_inner_size([1440.0, 900.0])
             .with_min_inner_size([900.0, 560.0])
             .with_drag_and_drop(true)
@@ -232,15 +248,23 @@ fn main() -> eframe::Result {
     #[cfg(target_os = "windows")]
     graphics::configure(&mut options, eframe::wgpu::Backends::from_env());
     eframe::run_native(
-        "DeckCraft",
+        PRODUCT_NAME,
         options,
         Box::new(move |cc| {
             let mut app = SlideApp::new(Session::new(), services());
+            brand_app(&mut app);
+            app.product_icon = app_icon().map(|icon| {
+                cc.egui_ctx.load_texture(
+                    "erpcons-product",
+                    egui::ColorImage::from_rgba_unmultiplied([icon.width as usize, icon.height as usize], &icon.rgba),
+                    egui::TextureOptions::LINEAR,
+                )
+            });
             load_prefs(&mut app);
             i18n::set_current(i18n::Lang::from_pref(&app.ui.language));
             // AutoRecover: reopen what a previous run left unsaved, then keep it current.
             if std::env::var_os("DECKCRAFT_NO_RECOVERY").is_none() {
-                app.session.recovery_dir = deckcraft_engine::recovery::default_dir();
+                app.session.recovery_dir = recovery_dir();
                 match app.session.execute("file.recovery.open", &serde_json::json!({})) {
                     Ok(v) => {
                         if let Some(n) = v.get("opened").and_then(|o| o.as_array()).map(Vec::len).filter(|n| *n > 0) {
@@ -266,7 +290,7 @@ fn main() -> eframe::Result {
                 let rx = control_server::start(port, cc.egui_ctx.clone());
                 app = app.with_control(rx);
             }
-            if sample && let Err(e) = deckcraft_engine::sample::open_sample(&mut app.session) {
+            if sample && let Err(e) = deckcraft_engine::sample::open_sample_with_product(&mut app.session, PRODUCT_NAME) {
                 log::error!("sample: {e}");
             }
             for f in files {
@@ -286,6 +310,41 @@ fn main() -> eframe::Result {
 #[cfg(test)]
 mod desktop_tests {
     use super::*;
+
+    #[test]
+    fn desktop_branding_preserves_shared_default() {
+        let mut app = SlideApp::new(Session::new(), Services::default());
+        assert_eq!(app.product_name, "DeckCraft");
+        brand_app(&mut app);
+        assert_eq!(app.product_name, "Trình chiếu – ERPCons");
+        assert_eq!(APP_ID, "vn.erpcons.trinhchieu");
+    }
+
+    #[test]
+    fn desktop_sample_uses_host_product_name() {
+        let mut session = Session::new();
+        deckcraft_engine::sample::open_sample_with_product(&mut session, PRODUCT_NAME).unwrap();
+        let doc = session.doc().unwrap().doc.as_ref();
+        assert!(doc.slides.first().unwrap().notes_text().contains(PRODUCT_NAME));
+        let data = serde_json::to_string(doc).unwrap();
+        assert!(data.contains("Made with Trình chiếu – ERPCons — free and open source"));
+        let mut shared = Session::new();
+        deckcraft_engine::sample::open_sample(&mut shared).unwrap();
+        assert!(shared.doc().unwrap().doc.slides.first().unwrap().notes_text().contains("made in DeckCraft"));
+    }
+
+    #[test]
+    fn settings_and_recovery_use_erpcons_paths() {
+        if let Some(dir) = config_dir() {
+            assert!(dir.ends_with("ERPCons/TrinhChieu"), "{}", dir.display());
+            assert_eq!(prefs_path(), Some(dir.join("ui.json")));
+        }
+        if let Some(dir) = recovery_dir() {
+            let suffix =
+                if cfg!(any(target_os = "macos", target_os = "windows")) { "ERPCons/TrinhChieu/Recovery" } else { "ERPCons/TrinhChieu/recovery" };
+            assert!(dir.ends_with(suffix), "{}", dir.display());
+        }
+    }
 
     #[test]
     fn recovery_counts_are_translated() {

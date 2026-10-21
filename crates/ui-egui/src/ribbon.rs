@@ -162,7 +162,7 @@ fn named(resp: egui::Response, tip: &str) -> egui::Response {
 
 /// The presentation's name and where saving it stands: "Saving…", "Save failed" or "Edited".
 pub(crate) fn document_title(app: &SlideApp) -> String {
-    let Some(d) = app.session.active() else { return "DeckCraft".into() };
+    let Some(d) = app.session.active() else { return app.product_name.into() };
     let state = match app.save_state(d.uid) {
         Some(s) => Some(s.label()),
         None if d.is_dirty() => Some(crate::tl!("Edited")),
@@ -1414,7 +1414,7 @@ fn design(app: &mut SlideApp, ui: &mut Ui) {
                     paint_theme_tile(p, r, th);
                 }
             },
-            |i| names.get(i).cloned().unwrap_or_default(),
+            |i| names.get(i).map(|name| app.product_label(name)).unwrap_or_default(),
         ) && let Some(n) = names.get(i)
         {
             run(app, "design.theme", json!({"name": n}));
@@ -1434,7 +1434,13 @@ fn design(app: &mut SlideApp, ui: &mut Ui) {
                             theme::to_color32(*c),
                         );
                     }
-                    p.text(rect.min + vec2(104.0, 10.0), Align2::LEFT_CENTER, &cs.name, theme::font(12.0), Tokens::get(ui.ctx()).text);
+                    p.text(
+                        rect.min + vec2(104.0, 10.0),
+                        Align2::LEFT_CENTER,
+                        app.product_label(&cs.name),
+                        theme::font(12.0),
+                        Tokens::get(ui.ctx()).text,
+                    );
                     if resp.clicked() {
                         run(app, "design.colors", json!({"name": cs.name}));
                         ui.close();
@@ -2590,7 +2596,7 @@ fn slide_master(app: &mut SlideApp, ui: &mut Ui) {
         let r = big_button(ui, Icon::Themes, "Themes", true);
         egui::Popup::menu(&r).show(|ui| {
             for th in deckcraft_model::theme::builtin_themes() {
-                if ui.button(&th.name).clicked() {
+                if ui.button(app.product_label(&th.name)).clicked() {
                     run(app, "design.theme", json!({"name": th.name}));
                 }
             }

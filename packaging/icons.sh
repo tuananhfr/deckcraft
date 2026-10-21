@@ -4,7 +4,7 @@
 #   assets/app-icon/deckcraft.ico    Windows (16–256 px, from hicolor/*)
 #   assets/app-icon/deckcraft.icns   macOS (16–1024 px, from deckcraft-1024.png; needs sips + iconutil)
 #
-# The PNGs themselves are rendered by DeckCraft from assets/app-icon/icon-source.deckcraft.
+# The PNGs are derived from ERPCons contributor-original artwork; see ATTRIBUTION.md.
 # The outputs are committed, so builds and packaging never need these tools; package scripts
 # call this only when an output is missing.
 #
@@ -12,7 +12,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIR="$ROOT/assets/app-icon"
-ID="ai.storyteller.deckcraft"
+ID="vn.erpcons.trinhchieu"
 SRC="$DIR/deckcraft-1024.png"
 WANT="${*:-ico icns}"
 TMP="$(mktemp -d)"

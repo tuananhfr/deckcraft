@@ -7,13 +7,13 @@
   <key>CFBundleDevelopmentRegion</key>
   <string>en</string>
   <key>CFBundleDisplayName</key>
-  <string>DeckCraft</string>
+  <string>Trình chiếu – ERPCons</string>
   <key>CFBundleName</key>
-  <string>DeckCraft</string>
+  <string>Trình chiếu – ERPCons</string>
   <key>CFBundleExecutable</key>
-  <string>DeckCraft</string>
+  <string>deckcraft</string>
   <key>CFBundleIdentifier</key>
-  <string>ai.storyteller.deckcraft</string>
+  <string>vn.erpcons.trinhchieu</string>
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
   <key>CFBundlePackageType</key>
@@ -29,7 +29,7 @@
   <key>DeckCraftBuildCommit</key>
   <string>@BUILD_SHA@</string>
   <key>CFBundleIconFile</key>
-  <string>DeckCraft</string>
+  <string>deckcraft</string>
   <key>LSApplicationCategoryType</key>
   <string>public.app-category.productivity</string>
   <!-- Must match MACOSX_DEPLOYMENT_TARGET in package.sh. Big Sur is the first release on
@@ -50,16 +50,16 @@
   <array>
     <dict>
       <key>UTTypeIdentifier</key>
-      <string>ai.storyteller.deckcraft.presentation</string>
+      <string>vn.erpcons.trinhchieu.presentation</string>
       <key>UTTypeDescription</key>
-      <string>DeckCraft Presentation</string>
+      <string>Trình chiếu – ERPCons Presentation</string>
       <key>UTTypeConformsTo</key>
       <array>
         <string>public.data</string>
         <string>public.presentation</string>
       </array>
       <key>UTTypeIconFile</key>
-      <string>DeckCraft</string>
+      <string>deckcraft</string>
       <key>UTTypeTagSpecification</key>
       <dict>
         <key>public.filename-extension</key>

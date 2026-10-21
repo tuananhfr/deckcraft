@@ -243,6 +243,8 @@ pub struct Perf {
 }
 
 pub struct SlideApp {
+    pub product_name: &'static str,
+    pub product_icon: Option<egui::TextureHandle>,
     pub session: Session,
     pub services: Services,
     pub ui: UiState,
@@ -326,6 +328,8 @@ impl SlideApp {
     pub fn new(session: Session, mut services: Services) -> Self {
         let audio_out = services.audio_out.take();
         SlideApp {
+            product_name: "DeckCraft",
+            product_icon: None,
             session,
             services,
             ui: UiState::default(),
@@ -375,13 +379,36 @@ impl SlideApp {
         }
     }
 
+    pub fn product_label(&self, source: &str) -> String {
+        source.replace("DeckCraft", self.product_name)
+    }
+
+    pub fn product_text(&self, source: &str) -> String {
+        let translated = crate::i18n::t(source);
+        if self.product_name == "DeckCraft" { translated.into() } else { translated.replace(crate::i18n::t("DeckCraft"), self.product_name) }
+    }
+
+    pub(crate) fn paint_product_logo(&self, ui: &egui::Ui, rect: egui::Rect) {
+        if let Some(texture) = &self.product_icon {
+            egui::Image::new(texture).paint_at(ui, rect);
+        } else if self.product_name == "DeckCraft" {
+            dialogs::paint_logo(ui.painter(), rect);
+        }
+    }
+
     pub fn with_control(mut self, rx: Receiver<ControlRequest>) -> Self {
         self.control_rx = Some(rx);
         self
     }
 
     pub fn set_status(&mut self, msg: impl Into<String>) {
-        self.status = Some((msg.into(), now_ms()));
+        let mut msg = msg.into();
+        if self.product_name != "DeckCraft" {
+            for phrase in ["DeckCraft cannot read", "not a presentation DeckCraft can read", "not a DeckCraft file:"] {
+                msg = msg.replace(phrase, &phrase.replace("DeckCraft", self.product_name));
+            }
+        }
+        self.status = Some((msg, now_ms()));
     }
 
     /// A presentation refused for the open-documents limit or the decompression limits is also
@@ -513,7 +540,7 @@ impl SlideApp {
             "outline" | "txt" => ("txt", "outline", false),
             "deckcraft" => ("deckcraft", "deckcraft", false),
             other => {
-                self.set_status(crate::i18n::fmt(crate::tl!("DeckCraft can't export “{format}”"), &[("format", other)]));
+                self.set_status(crate::i18n::fmt(&self.product_text("DeckCraft can't export “{format}”"), &[("format", other)]));
                 return false;
             }
         };
@@ -1009,7 +1036,7 @@ impl SlideApp {
         } else if lower.ends_with(".txt") || lower.ends_with(".md") {
             "slide.fromOutline"
         } else {
-            self.set_status(crate::i18n::fmt(crate::tl!("{name}: DeckCraft can't open this kind of file"), &[("name", name)]));
+            self.set_status(crate::i18n::fmt(&self.product_text("{name}: DeckCraft can't open this kind of file"), &[("name", name)]));
             return;
         };
         let p = if cmd == "slide.fromOutline" { json!({"text": String::from_utf8_lossy(bytes)}) } else { json!({"name": name, "data": data}) };
@@ -1695,6 +1722,55 @@ mod tests {
             app.run("app.saveAsDialog", json!({})).unwrap();
             assert!(asked.borrow().last().is_some_and(|s| s.ends_with(&format!(".{format}"))));
         }
+    }
+
+    #[test]
+    fn product_branding_titles_and_about_keep_web_default() {
+        use egui_kittest::kittest::Queryable;
+        for lang in [i18n::Lang::EN, i18n::Lang::from_pref("vi")] {
+            i18n::set_current(lang);
+            let mut app = SlideApp::new(Session::new(), Services::default());
+            assert_eq!(app.product_name, "DeckCraft");
+            assert_eq!(app.product_label("DeckCraft"), "DeckCraft");
+            assert_eq!(app.product_text("About DeckCraft"), i18n::t("About DeckCraft"));
+            assert_eq!(ribbon::document_title(&app), "DeckCraft");
+            app.product_name = "Trình chiếu – ERPCons";
+            app.ui.language = if lang == i18n::Lang::EN { "en" } else { "vi" }.into();
+            assert_eq!(ribbon::document_title(&app), "Trình chiếu – ERPCons");
+            app.set_status("DeckCraft.pptx: not a presentation DeckCraft can read");
+            assert_eq!(app.status.as_ref().unwrap().0, "DeckCraft.pptx: not a presentation Trình chiếu – ERPCons can read");
+            assert!(app.product_text("About DeckCraft").ends_with("Trình chiếu – ERPCons"));
+            assert!(app.product_text("Presenter View — DeckCraft").ends_with("Trình chiếu – ERPCons"));
+            let mut harness = egui_kittest::Harness::builder().with_size(egui::vec2(1200.0, 800.0)).build_ui_state(
+                |ui, app: &mut SlideApp| {
+                    app.logic(ui.ctx());
+                    if app.product_icon.is_none() {
+                        let icon =
+                            deckcraft_render::decode_image(include_bytes!("../../../assets/app-icon/hicolor/256x256/apps/vn.erpcons.trinhchieu.png"))
+                                .unwrap();
+                        app.product_icon = Some(ui.ctx().load_texture(
+                            "erpcons-product",
+                            egui::ColorImage::from_rgba_unmultiplied([icon.width() as usize, icon.height() as usize], icon.as_raw()),
+                            egui::TextureOptions::LINEAR,
+                        ));
+                    }
+                    if app.fonts_ready() {
+                        dialogs::about(app, ui);
+                    }
+                },
+                app,
+            );
+            harness.run_steps(2);
+            assert!(harness.query_by_label("Trình chiếu – ERPCons").is_some());
+            assert!(harness.query_by_label("ERPCons").is_some());
+            assert!(harness.query_by_label("https://office.erpcons.vn").is_some());
+            assert!(harness.query_by_label("ERPCons Văn phòng — dựa trên DeckCraft của nhóm ArtCraft. MIT OR Apache-2.0.").is_some());
+            if let Ok(dir) = std::env::var("DECKCRAFT_BRANDING_SCREENSHOTS") {
+                let suffix = if lang == i18n::Lang::EN { "en" } else { "vi" };
+                harness.render().unwrap().save(std::path::Path::new(&dir).join(format!("about-{suffix}.png"))).unwrap();
+            }
+        }
+        i18n::set_current(i18n::Lang::EN);
     }
 
     #[test]

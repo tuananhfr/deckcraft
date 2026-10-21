@@ -65,7 +65,7 @@ pub fn show(app: &mut SlideApp, ctx: &egui::Context) {
     let Some(mut d) = app.dialog.take() else { return };
     let mut open = true;
     let mut close = false;
-    let title = if d.id == crate::legacy_format::DIALOG { crate::legacy_format::title(&d) } else { crate::tl!(title(&d.id)).into() };
+    let title = if d.id == crate::legacy_format::DIALOG { crate::legacy_format::title(&d) } else { app.product_text(title(&d.id)) };
     egui::Window::new(title)
         .id(egui::Id::new(("dialog", d.id.clone())))
         .collapsible(false)
@@ -804,17 +804,21 @@ fn pretty_equation(s: &str) -> String {
     out.replace("sqrt", "√").replace("<=", "≤").replace(">=", "≥").replace("!=", "≠").replace("pi", "π").replace("+-", "±")
 }
 
-pub fn about(_app: &mut SlideApp, ui: &mut Ui) {
+pub fn about(app: &mut SlideApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
     ui.vertical_centered(|ui| {
         let (r, _) = ui.allocate_exact_size(vec2(64.0, 64.0), Sense::hover());
-        paint_logo(ui.painter(), r);
-        ui.label(egui::RichText::new("DeckCraft").font(theme::bold(22.0)));
+        app.paint_product_logo(ui, r);
+        ui.label(egui::RichText::new(app.product_name).font(theme::bold(22.0)));
         ui.label(egui::RichText::new(version_line()).color(t.text_dim));
         ui.add_space(6.0);
         ui.label(crate::tl!("Presentations and slide shows, rebuilt from scratch in pure Rust."));
         ui.label(crate::tl!("An open-source, clean-room project. Not affiliated with Microsoft."));
         ui.add_space(6.0);
+        if app.product_name != "DeckCraft" {
+            ui.label("ERPCons");
+            ui.hyperlink_to("https://office.erpcons.vn", "https://office.erpcons.vn");
+        }
         ui.label("ERPCons Văn phòng — dựa trên DeckCraft của nhóm ArtCraft. MIT OR Apache-2.0.");
         ui.add_space(6.0);
         ui.hyperlink_to(crate::tl!("Source on GitHub"), deckcraft_engine::links::GITHUB);

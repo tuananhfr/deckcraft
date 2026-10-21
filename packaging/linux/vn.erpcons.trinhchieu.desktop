@@ -1,14 +1,14 @@
 [Desktop Entry]
 Type=Application
-Name=DeckCraft
+Name=Trình chiếu – ERPCons
 GenericName=Presentation
-Comment=Create and present slide decks
+Comment=ERPCons presentations and slide shows
 Exec=deckcraft %F
 TryExec=deckcraft
-Icon=ai.storyteller.deckcraft
+Icon=vn.erpcons.trinhchieu
 Terminal=false
 StartupNotify=true
-StartupWMClass=ai.storyteller.deckcraft
+StartupWMClass=vn.erpcons.trinhchieu
 Categories=Office;Presentation;
 MimeType=application/x-deckcraft;application/vnd.openxmlformats-officedocument.presentationml.presentation;application/vnd.openxmlformats-officedocument.presentationml.template;application/vnd.openxmlformats-officedocument.presentationml.slideshow;
 Keywords=presentation;slides;slide show;deck;pptx;keynote;powerpoint;

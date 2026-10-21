@@ -1,78 +1,90 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  DeckCraft MSI (WiX Toolset v5: `dotnet tool install -g wix`). Built by package.ps1:
+  Trình chiếu – ERPCons MSI (WiX Toolset v5: `dotnet tool install -g wix`). Built by package.ps1:
 
     wix build deckcraft.wxs -arch x64 -d Version=1.2.3 -d BinDir=... -d IconPath=... -o out.msi
 
   Per-machine install into Program Files, a Start Menu shortcut, `.deckcraft` owned by
-  DeckCraft, and DeckCraft offered under "Open with" for .pptx/.potx/.ppsx (without taking over
+  Trình chiếu – ERPCons, and Trình chiếu – ERPCons offered under "Open with" for .pptx/.potx/.ppsx (without taking over
   the user's default app for them).
 
-  UpgradeCode is fixed for DeckCraft forever (playbook §6); never change it.
+  UpgradeCode belongs to the ERPCons product; keep it fixed for future upgrades.
 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
   <Package
-      Name="DeckCraft"
-      Manufacturer="Learning Machines LLC"
+      Name="Trình chiếu – ERPCons"
+      Manufacturer="ERPCons"
       Version="$(var.Version)"
-      UpgradeCode="6F9C69E7-7825-40D2-BF26-C274DA676425"
+      UpgradeCode="88ECA095-071A-4037-BC70-6E1E8D01451D"
       Scope="perMachine"
       Compressed="yes"
-      Language="1033">
-    <SummaryInformation Description="DeckCraft presentations and slide shows" Manufacturer="Learning Machines LLC" />
+      Language="1033"
+      Codepage="65001">
+    <SummaryInformation Codepage="65001" Description="Trình chiếu – ERPCons presentations and slide shows" Manufacturer="ERPCons" />
     <!-- Same-version upgrades let successive pre-releases of one X.Y.Z replace each other
          (MSI versions are numeric, so 1.2.3-rc.1 and 1.2.3-rc.2 are both 1.2.3). -->
     <MajorUpgrade AllowSameVersionUpgrades="yes"
-        DowngradeErrorMessage="A newer version of DeckCraft is already installed." />
+        DowngradeErrorMessage="A newer version of Trình chiếu – ERPCons is already installed." />
     <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
 
     <Icon Id="DeckcraftIcon.ico" SourceFile="$(var.IconPath)" />
     <Property Id="ARPPRODUCTICON" Value="DeckcraftIcon.ico" />
-    <Property Id="ARPURLINFOABOUT" Value="https://github.com/tuananhfr/deckcraft" />
+    <Property Id="ARPURLINFOABOUT" Value="https://office.erpcons.vn" />
     <Property Id="ARPURLUPDATEINFO" Value="https://github.com/tuananhfr/deckcraft/releases" />
     <Property Id="ARPHELPLINK" Value="https://github.com/tuananhfr/deckcraft/issues" />
 
     <StandardDirectory Id="ProgramFiles6432Folder">
-      <Directory Id="INSTALLFOLDER" Name="DeckCraft" />
+      <Directory Id="ERPConsFolder" Name="ERPCons">
+        <Directory Id="INSTALLFOLDER" Name="TrinhChieu" />
+      </Directory>
     </StandardDirectory>
     <StandardDirectory Id="ProgramMenuFolder" />
 
-    <Feature Id="Main" Title="DeckCraft" Level="1">
+    <Feature Id="Main" Title="Trình chiếu – ERPCons" Level="1">
       <ComponentGroupRef Id="DeckcraftFiles" />
     </Feature>
   </Package>
 
   <Fragment>
     <ComponentGroup Id="DeckcraftFiles" Directory="INSTALLFOLDER">
-      <Component Id="DeckcraftApp" Guid="D87EA444-41A4-4C19-922E-66D1A29461FF">
+      <Component Id="DeckcraftApp" Guid="8F8F8A39-DB0E-426E-AB7D-775A5E79B93F">
         <File Id="DeckcraftExe" Source="$(var.BinDir)\deckcraft.exe" KeyPath="yes">
-          <Shortcut Id="StartMenuShortcut" Directory="ProgramMenuFolder" Name="DeckCraft"
-              Description="DeckCraft presentations and slide shows" WorkingDirectory="INSTALLFOLDER" Advertise="yes"
+          <Shortcut Id="StartMenuShortcut" Directory="ProgramMenuFolder" Name="Trình chiếu – ERPCons"
+              Description="Trình chiếu – ERPCons presentations and slide shows" WorkingDirectory="INSTALLFOLDER" Advertise="yes"
               Icon="DeckcraftIcon.ico" IconIndex="0" />
         </File>
 
-        <!-- .deckcraft: DeckCraft's own format. -->
-        <ProgId Id="DeckCraft.Presentation" Description="DeckCraft Presentation" Icon="DeckcraftExe" IconIndex="0">
+        <!-- .deckcraft: Trình chiếu – ERPCons's own format. -->
+        <ProgId Id="ERPCons.TrinhChieu.deckcraft" Description="Trình chiếu – ERPCons Presentation" Icon="DeckcraftExe" IconIndex="0">
           <Extension Id="deckcraft" ContentType="application/x-deckcraft">
             <Verb Id="open" Command="Open" TargetFile="DeckcraftExe" Argument="&quot;%1&quot;" />
           </Extension>
         </ProgId>
 
         <!-- "Open with" for PowerPoint formats, without becoming the default. -->
-        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\deckcraft.exe" Name="FriendlyAppName" Value="DeckCraft" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\Applications\deckcraft.exe" Name="FriendlyAppName" Value="Trình chiếu – ERPCons" Type="string" />
         <RegistryValue Root="HKLM" Key="Software\Classes\Applications\deckcraft.exe\shell\open\command" Value="&quot;[#DeckcraftExe]&quot; &quot;%1&quot;" Type="string" />
         <RegistryValue Root="HKLM" Key="Software\Classes\Applications\deckcraft.exe\SupportedTypes" Name=".deckcraft" Value="" Type="string" />
         <RegistryValue Root="HKLM" Key="Software\Classes\Applications\deckcraft.exe\SupportedTypes" Name=".pptx" Value="" Type="string" />
         <RegistryValue Root="HKLM" Key="Software\Classes\Applications\deckcraft.exe\SupportedTypes" Name=".potx" Value="" Type="string" />
         <RegistryValue Root="HKLM" Key="Software\Classes\Applications\deckcraft.exe\SupportedTypes" Name=".ppsx" Value="" Type="string" />
-        <RegistryValue Root="HKLM" Key="Software\Classes\.pptx\OpenWithProgids" Name="DeckCraft.Presentation" Value="" Type="string" />
-        <RegistryValue Root="HKLM" Key="Software\Classes\.potx\OpenWithProgids" Name="DeckCraft.Presentation" Value="" Type="string" />
-        <RegistryValue Root="HKLM" Key="Software\Classes\.ppsx\OpenWithProgids" Name="DeckCraft.Presentation" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\ERPCons.TrinhChieu.pptx" Value="Trình chiếu – ERPCons Presentation" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\ERPCons.TrinhChieu.pptx\DefaultIcon" Value="&quot;[#DeckcraftExe]&quot;,0" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\ERPCons.TrinhChieu.pptx\shell\open\command" Value="&quot;[#DeckcraftExe]&quot; &quot;%1&quot;" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\.pptx\OpenWithProgids" Name="ERPCons.TrinhChieu.pptx" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\ERPCons.TrinhChieu.potx" Value="Trình chiếu – ERPCons Presentation" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\ERPCons.TrinhChieu.potx\DefaultIcon" Value="&quot;[#DeckcraftExe]&quot;,0" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\ERPCons.TrinhChieu.potx\shell\open\command" Value="&quot;[#DeckcraftExe]&quot; &quot;%1&quot;" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\.potx\OpenWithProgids" Name="ERPCons.TrinhChieu.potx" Value="" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\ERPCons.TrinhChieu.ppsx" Value="Trình chiếu – ERPCons Presentation" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\ERPCons.TrinhChieu.ppsx\DefaultIcon" Value="&quot;[#DeckcraftExe]&quot;,0" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\ERPCons.TrinhChieu.ppsx\shell\open\command" Value="&quot;[#DeckcraftExe]&quot; &quot;%1&quot;" Type="string" />
+        <RegistryValue Root="HKLM" Key="Software\Classes\.ppsx\OpenWithProgids" Name="ERPCons.TrinhChieu.ppsx" Value="" Type="string" />
 
         <RegistryValue Root="HKLM" Key="Software\Microsoft\Windows\CurrentVersion\App Paths\deckcraft.exe" Value="[#DeckcraftExe]" Type="string" />
       </Component>
 
-      <Component Id="DeckcraftCli">
+      <Component Id="DeckcraftCli" Guid="3196A0AF-25AB-4613-9160-338043332171">
         <File Id="DeckcraftCliExe" Source="$(var.BinDir)\deckcraft-cli.exe" KeyPath="yes" />
       </Component>
     </ComponentGroup>

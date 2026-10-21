@@ -1,5 +1,7 @@
 # ERPCons changes
 
+- ERPCons branding (desktop): use Trình chiếu – ERPCons, isolated ERPCons/TrinhChieu storage, ERPCons icons and installer identities; preserve web branding and binary names.
+
 - Rich clipboard (desktop): copy HTML with plain text and read native HTML on paste through arboard, with plain-text fallback and existing session clipboard preservation.
 - Save picker (desktop): default new presentations to .pptx, retain opened formats and offer .deckcraft alongside .pptx; keep loss warnings.
 - Recovery notices (desktop): show a translated warning on recovery failure and translate recovered presentation counts.

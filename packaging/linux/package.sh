@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Build and package DeckCraft for Linux (<arch> is x86_64 or aarch64, or riscv64 when cross-compiling):
+# Build and package Trình chiếu – ERPCons for Linux (<arch> is x86_64 or aarch64, or riscv64 when cross-compiling):
 #
-#   $DIST/deckcraft-<version>-linux-<arch>.AppImage  any distro with glibc >= the build host's
-#   $DIST/deckcraft-<version>-linux-<arch>.AppImage.zsync  delta updates (needs zsyncmake)
-#   $DIST/deckcraft-<version>-linux-<arch>.deb       Debian, Ubuntu, Mint, Pop!_OS, ...
-#   $DIST/deckcraft-<version>-linux-<arch>.rpm       Fedora, openSUSE, RHEL, ...
-#   $DIST/deckcraft-<version>-linux-<arch>.tar.gz    plain FHS-style tree (bin/, share/)
+#   $DIST/ERPCons-TrinhChieu-<version>-linux-<arch>.AppImage  any distro with glibc >= the build host's
+#   $DIST/ERPCons-TrinhChieu-<version>-linux-<arch>.AppImage.zsync  delta updates (needs zsyncmake)
+#   $DIST/ERPCons-TrinhChieu-<version>-linux-<arch>.deb       Debian, Ubuntu, Mint, Pop!_OS, ...
+#   $DIST/ERPCons-TrinhChieu-<version>-linux-<arch>.rpm       Fedora, openSUSE, RHEL, ...
+#   $DIST/ERPCons-TrinhChieu-<version>-linux-<arch>.tar.gz    plain FHS-style tree (bin/, share/)
 #
 # Usage: packaging/linux/package.sh [--skip-build] [--formats "appimage deb rpm tar"]
 #
@@ -17,7 +17,7 @@ set -euo pipefail
 # shellcheck source=../common.sh
 . "$(dirname "${BASH_SOURCE[0]}")/../common.sh"
 HERE="$ROOT/packaging/linux"
-APP_ID=ai.storyteller.deckcraft
+APP_ID=vn.erpcons.trinhchieu
 
 SKIP_BUILD=0
 FORMATS="appimage deb rpm tar"
@@ -37,10 +37,10 @@ case "$ARCH" in
   aarch64 | arm64) ARCH=aarch64; DEB_ARCH=arm64 ;;
   *) echo "unsupported architecture $ARCH" >&2; exit 2 ;;
 esac
-export DECKCRAFT_MAINTAINER="${DECKCRAFT_MAINTAINER:-DeckCraft maintainers <deckcraft@storyteller.ai>}"
-BASENAME="deckcraft-$VERSION-linux-$ARCH"
+export DECKCRAFT_MAINTAINER="${DECKCRAFT_MAINTAINER:-ERPCons}"
+BASENAME="ERPCons-TrinhChieu-$VERSION-linux-$ARCH"
 
-echo "==> DeckCraft $VERSION for Linux $ARCH ($FORMATS)"
+echo "==> Trình chiếu – ERPCons $VERSION for Linux $ARCH ($FORMATS)"
 
 if [ "$SKIP_BUILD" = 0 ]; then
   if [ -n "${CROSS_TARGET:-}" ]; then
@@ -65,8 +65,9 @@ sed -e "s/@VERSION@/$VERSION/g" -e "s/@DATE@/$DECKCRAFT_BUILD_DATE/g" \
   "$HERE/$APP_ID.metainfo.xml.in" >"$STAGE/usr/share/metainfo/$APP_ID.metainfo.xml"
 mkdir -p "$STAGE/usr/share/icons"
 cp -R "$ROOT/assets/app-icon/hicolor" "$STAGE/usr/share/icons/"
-mkdir -p "$STAGE/usr/share/doc/deckcraft"
-copy_docs "$STAGE/usr/share/doc/deckcraft"
+rm -f "$STAGE/usr/share/icons/hicolor/32x32/apps/ai.storyteller.deckcraft.png"
+mkdir -p "$STAGE/usr/share/doc/erpcons-trinhchieu"
+copy_docs "$STAGE/usr/share/doc/erpcons-trinhchieu"
 
 if command -v desktop-file-validate >/dev/null; then
   desktop-file-validate "$STAGE/usr/share/applications/$APP_ID.desktop"
@@ -99,7 +100,7 @@ fi
 
 # ---- AppImage -----------------------------------------------------------------------------------
 if has appimage; then
-  APPDIR="$WORK/DeckCraft.AppDir"
+  APPDIR="$WORK/TrinhChieu.AppDir"
   cp -R "$STAGE" "$APPDIR"
   mv "$APPDIR/usr/share/doc" "$WORK/doc-unused"
   ln -s usr/bin/deckcraft "$APPDIR/AppRun"
@@ -126,8 +127,8 @@ if has appimage; then
   # fetch only the blocks that changed in a newer release, through the .zsync published next to
   # each AppImage on GitHub Releases. `latest` is the newest published release that is not a
   # pre-release. A fork's builds point at its own releases through GITHUB_REPOSITORY.
-  REPO="${GITHUB_REPOSITORY:-storytold/deckcraft}"
-  UPDATE_INFO="gh-releases-zsync|${REPO%%/*}|${REPO#*/}|latest|deckcraft-*-linux-$ARCH.AppImage.zsync"
+  REPO="${GITHUB_REPOSITORY:-tuananhfr/deckcraft}"
+  UPDATE_INFO="gh-releases-zsync|${REPO%%/*}|${REPO#*/}|latest|ERPCons-TrinhChieu-*-linux-$ARCH.AppImage.zsync"
   # Extract-and-run: works without FUSE (containers, CI). The output embeds the static runtime,
   # so users don't need libfuse2 either. With zsyncmake on the host (CI installs the zsync
   # package) appimagetool also writes the .zsync, into its working directory, hence the cd.

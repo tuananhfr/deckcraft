@@ -1,11 +1,11 @@
 kind = "app"
 categories = ["Office"]
-icon = "assets/app-icon/hicolor/256x256/apps/ai.storyteller.deckcraft.png"
+icon = "assets/app-icon/hicolor/256x256/apps/vn.erpcons.trinhchieu.png"
 
 [linux.x86_64]
-asset = "deckcraft-{version}-linux-x86_64.tar.gz"
-exec = "deckcraft-{version}-linux-x86_64/bin/deckcraft"
+asset = "ERPCons-TrinhChieu-{version}-linux-x86_64.tar.gz"
+exec = "ERPCons-TrinhChieu-{version}-linux-x86_64/bin/deckcraft"
 
 [linux.aarch64]
-asset = "deckcraft-{version}-linux-aarch64.tar.gz"
-exec = "deckcraft-{version}-linux-aarch64/bin/deckcraft"
+asset = "ERPCons-TrinhChieu-{version}-linux-aarch64.tar.gz"
+exec = "ERPCons-TrinhChieu-{version}-linux-aarch64/bin/deckcraft"
