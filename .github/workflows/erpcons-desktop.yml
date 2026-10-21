@@ -1,0 +1,241 @@
+name: ERPCons desktop installers
+
+on:
+  push:
+    tags: ["erpcons-v*"]
+    # Dry runs without a release: workflow_dispatch needs the file on the default branch (upstream's main).
+    branches: ["installers/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: never
+  CARGO_INCREMENTAL: "0"
+  CRAFT_FONTS_REF: 43913056ce82a3fdad0ef69f6b88d1dc922a8104
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: bash
+    env:
+      CRAFT_FONTS_DIR: ${{ github.workspace }}/craft-fonts
+      CRAFT_FONTS_REQUIRED: "1"
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Rust (stable)
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+      - name: Validate release version
+        id: version
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          version=$(cargo pkgid -p deckcraft | sed 's/.*[#@]//')
+          if [ "$REF_TYPE" = tag ] && [ "$TAG" != "erpcons-v$version" ]; then
+            echo "::error::Tag must be exactly erpcons-v$version (got $TAG)"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "DECKCRAFT_VERSION=$version" >> "$GITHUB_ENV"
+      - name: Check out craft-fonts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: tuananhfr/craft-fonts
+          ref: ${{ env.CRAFT_FONTS_REF }}
+          path: craft-fonts
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Install WiX 5.0.2
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version 5.0.2
+          if ($LASTEXITCODE -ne 0) { throw 'WiX installation failed' }
+          wix extension add -g WixToolset.UI.wixext/5.0.2
+          if ($LASTEXITCODE -ne 0) { throw 'WiX UI extension installation failed' }
+          wix extension add -g WixToolset.Util.wixext/5.0.2
+          if ($LASTEXITCODE -ne 0) { throw 'WiX Util extension installation failed' }
+      - name: Package unsigned Windows installers
+        shell: pwsh
+        run: pwsh packaging/windows/package.ps1 -Arch x64
+      - name: Stage release files
+        run: |
+          mkdir -p release-files
+          cp "dist/release/ERPCons-TrinhChieu-$DECKCRAFT_VERSION-x64.msi" release-files/ERPCons-TrinhChieu-windows-x64.msi
+          cp "dist/release/ERPCons-TrinhChieu-$DECKCRAFT_VERSION-x64.zip" release-files/ERPCons-TrinhChieu-windows-x64-portable.zip
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: erpcons-desktop-windows
+          path: release-files/*
+          if-no-files-found: error
+          retention-days: 14
+
+  linux:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: bash
+    env:
+      CRAFT_FONTS_DIR: ${{ github.workspace }}/craft-fonts
+      CRAFT_FONTS_REQUIRED: "1"
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Rust (stable)
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+      - name: Validate release version
+        id: version
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          version=$(cargo pkgid -p deckcraft | sed 's/.*[#@]//')
+          if [ "$REF_TYPE" = tag ] && [ "$TAG" != "erpcons-v$version" ]; then
+            echo "::error::Tag must be exactly erpcons-v$version (got $TAG)"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "DECKCRAFT_VERSION=$version" >> "$GITHUB_ENV"
+      - name: Check out craft-fonts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: tuananhfr/craft-fonts
+          ref: ${{ env.CRAFT_FONTS_REF }}
+          path: craft-fonts
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Install Linux build dependencies (winit, wgpu, rfd)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            pkg-config libasound2-dev libgl1-mesa-dev libxkbcommon-dev libwayland-dev libx11-dev libxcursor-dev libxrandr-dev \
+            libxi-dev libgtk-3-dev libfontconfig1-dev libfreetype-dev mesa-vulkan-drivers
+          sudo apt-get install -y --no-install-recommends zsync
+      - name: Install pinned packaging tools
+        run: |
+          tools="$RUNNER_TEMP/packaging-tools"
+          mkdir -p "$tools"
+          cd "$tools"
+          curl -fsSL --retry 3 -O https://github.com/goreleaser/nfpm/releases/download/v2.41.3/nfpm_2.41.3_Linux_x86_64.tar.gz
+          echo '22aa6d3bc2ec239d62d3d190bcb036a47f2b24e0c3c6edfccebb6a55fbb2078e  nfpm_2.41.3_Linux_x86_64.tar.gz' | sha256sum -c -
+          tar -xzf nfpm_2.41.3_Linux_x86_64.tar.gz nfpm
+          chmod +x nfpm
+          echo "$tools" >> "$GITHUB_PATH"
+          curl -fsSL --retry 3 -o appimagetool https://github.com/AppImage/appimagetool/releases/download/1.9.0/appimagetool-x86_64.AppImage
+          chmod +x appimagetool
+          echo "APPIMAGETOOL=$tools/appimagetool" >> "$GITHUB_ENV"
+      - name: Package Linux installers
+        run: bash packaging/linux/package.sh --formats "appimage deb rpm"
+      - name: Stage release files
+        run: |
+          mkdir -p release-files
+          cp "dist/release/ERPCons-TrinhChieu-$DECKCRAFT_VERSION-linux-x86_64.AppImage" release-files/ERPCons-TrinhChieu-linux-x86_64.AppImage
+          cp "dist/release/ERPCons-TrinhChieu-$DECKCRAFT_VERSION-linux-x86_64.deb" release-files/erpcons-trinhchieu_amd64.deb
+          cp "dist/release/ERPCons-TrinhChieu-$DECKCRAFT_VERSION-linux-x86_64.rpm" release-files/erpcons-trinhchieu.x86_64.rpm
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: erpcons-desktop-linux
+          path: release-files/*
+          if-no-files-found: error
+          retention-days: 14
+
+  macos:
+    runs-on: macos-14
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: bash
+    env:
+      CRAFT_FONTS_DIR: ${{ github.workspace }}/craft-fonts
+      CRAFT_FONTS_REQUIRED: "1"
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Rust (stable)
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+      - name: Validate release version
+        id: version
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          version=$(cargo pkgid -p deckcraft | sed 's/.*[#@]//')
+          if [ "$REF_TYPE" = tag ] && [ "$TAG" != "erpcons-v$version" ]; then
+            echo "::error::Tag must be exactly erpcons-v$version (got $TAG)"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "DECKCRAFT_VERSION=$version" >> "$GITHUB_ENV"
+      - name: Check out craft-fonts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: tuananhfr/craft-fonts
+          ref: ${{ env.CRAFT_FONTS_REF }}
+          path: craft-fonts
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - name: Install universal Rust targets
+        run: rustup target add x86_64-apple-darwin aarch64-apple-darwin
+      - name: Package ad-hoc signed macOS installer
+        run: bash packaging/macos/package.sh --arch universal
+      - name: Stage release files
+        run: |
+          mkdir -p release-files
+          cp "dist/release/ERPCons-TrinhChieu-$DECKCRAFT_VERSION-macos-universal.dmg" release-files/ERPCons-TrinhChieu-macos-universal.dmg
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: erpcons-desktop-macos
+          path: release-files/*
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/erpcons-v')
+    needs: [windows, linux, macos]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0 # v5
+        with:
+          pattern: erpcons-desktop-*
+          merge-multiple: true
+          path: release-files
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.windows.outputs.version }}
+        run: |
+          cd release-files
+          sha256sum -- * > SHA256SUMS.txt
+          cat > "$RUNNER_TEMP/release-notes.md" <<'NOTES'
+          Tải Trình chiếu – ERPCons cho máy tính:
+
+          - Windows x64: tải `ERPCons-TrinhChieu-windows-x64.msi` để cài đặt, hoặc giải nén `ERPCons-TrinhChieu-windows-x64-portable.zip` để chạy trực tiếp.
+          - Linux x86_64: tải `ERPCons-TrinhChieu-linux-x86_64.AppImage` (cấp quyền thực thi trước khi chạy), `erpcons-trinhchieu_amd64.deb` cho Debian/Ubuntu, hoặc `erpcons-trinhchieu.x86_64.rpm` cho Fedora/openSUSE.
+          - macOS (Apple Silicon và Intel): tải `ERPCons-TrinhChieu-macos-universal.dmg`, mở và kéo ứng dụng vào Applications.
+
+          Bản dựng chưa có chứng chỉ ký mã: Windows không được ký; macOS chỉ ký ad-hoc và chưa được công chứng (notarization).
+          - Windows SmartScreen: chọn "More info" → "Run anyway".
+          - macOS: nhấp chuột phải vào ứng dụng → Open, hoặc chạy:
+            `xattr -dr com.apple.quarantine "/Applications/Trình chiếu – ERPCons.app"`
+
+          Đối chiếu mã SHA-256 của tệp tải về với `SHA256SUMS.txt`.
+          Dùng bản web tại https://office.erpcons.vn.
+          NOTES
+          gh release create "$TAG" --verify-tag --latest --title "Trình chiếu – ERPCons $VERSION" --notes-file "$RUNNER_TEMP/release-notes.md" ./*

@@ -1,5 +1,6 @@
 # ERPCons changes
 
+- Desktop installers (desktop): build unsigned Windows, ad-hoc signed universal macOS and Linux packages in GitHub Actions; publish fixed download names and checksums for validated ERPCons version tags.
 - ERPCons branding (desktop): use Trình chiếu – ERPCons, isolated ERPCons/TrinhChieu storage, ERPCons icons and installer identities; preserve web branding and binary names.
 
 - Rich clipboard (desktop): copy HTML with plain text and read native HTML on paste through arboard, with plain-text fallback and existing session clipboard preservation.
