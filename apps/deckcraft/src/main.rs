@@ -12,6 +12,8 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+#[cfg(target_os = "macos")]
+mod apple_events;
 mod audio;
 mod control_server;
 #[cfg(any(target_os = "windows", test))]
@@ -23,7 +25,7 @@ use deckcraft_engine::Session;
 use deckcraft_ui_egui::i18n;
 use deckcraft_ui_egui::{Services, SlideApp};
 
-struct App(SlideApp, String);
+struct App(SlideApp, String, #[cfg(target_os = "macos")] fmv_macos_events::Inbox);
 
 impl App {
     fn save_language_change(&mut self) {
@@ -39,6 +41,8 @@ impl App {
 
 impl eframe::App for App {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        #[cfg(target_os = "macos")]
+        apple_events::poll(&self.2, &mut self.0, ctx);
         self.0.logic(ctx);
         self.save_language_change();
     }
@@ -247,6 +251,10 @@ fn main() -> eframe::Result {
     // Before eframe creates the wgpu instance: default Windows to DirectX 12 only (see graphics.rs).
     #[cfg(target_os = "windows")]
     graphics::configure(&mut options, eframe::wgpu::Backends::from_env());
+    #[cfg(target_os = "macos")]
+    let apple_events = apple_events::AppleEvents::install();
+    #[cfg(target_os = "macos")]
+    let apple_events = &apple_events;
     eframe::run_native(
         PRODUCT_NAME,
         options,
@@ -302,7 +310,12 @@ fn main() -> eframe::Result {
                 app.start_show(0, false);
             }
             let language = app.ui.language.clone();
-            Ok(Box::new(App(app, language)))
+            Ok(Box::new(App(
+                app,
+                language,
+                #[cfg(target_os = "macos")]
+                apple_events.connect(&cc.egui_ctx),
+            )))
         }),
     )
 }

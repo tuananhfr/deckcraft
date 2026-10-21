@@ -1,5 +1,6 @@
 """Run with python3 packaging/test-document-associations.py."""
 from pathlib import Path
+import plistlib
 import unittest
 import xml.etree.ElementTree as ET
 
@@ -20,6 +21,34 @@ class DocumentAssociations(unittest.TestCase):
         self.assertTrue(any(v["Root"] == "HKLM" and v["Key"] == key and v.get("Name") == name
                             and v["Value"] == value and v["Type"] == "string" for v in self.values),
                         (key, name, value))
+
+    def test_macos_document_types_and_icons(self):
+        info = plistlib.loads((ROOT / "packaging/macos/Info.plist.in").read_bytes())
+        own_uti = "vn.erpcons.trinhchieu.presentation"
+        system_prefix = "org.openxmlformats.presentationml."
+        expected = {own_uti: ("deckcraft", "Owner"),
+                    system_prefix + "presentation": ("pptx", "Alternate"),
+                    system_prefix + "template": ("potx", "Alternate"),
+                    system_prefix + "slideshow": ("ppsx", "Alternate")}
+        self.assertEqual({d["UTTypeIdentifier"] for d in info["UTExportedTypeDeclarations"]}, {own_uti})
+        self.assertEqual({d["UTTypeIdentifier"] for d in info["UTImportedTypeDeclarations"]}, set(expected) - {own_uti})
+        documents = info["CFBundleDocumentTypes"]
+        self.assertEqual(len(documents), len(expected))
+        self.assertEqual({tuple(d["LSItemContentTypes"]) for d in documents}, {(uti,) for uti in expected})
+        declarations = {d["UTTypeIdentifier"]: d for key in ("UTExportedTypeDeclarations", "UTImportedTypeDeclarations")
+                        for d in info[key]}
+        for document in documents:
+            uti, = document["LSItemContentTypes"]
+            with self.subTest(uti=uti):
+                extension, rank = expected[uti]
+                self.assertEqual(document["CFBundleTypeRole"], "Editor")
+                self.assertEqual(document["LSHandlerRank"], rank)
+                self.assertEqual(document["CFBundleTypeIconFile"], "deckcraft")
+                self.assertEqual(declarations[uti]["UTTypeTagSpecification"]["public.filename-extension"], [extension])
+        self.assertEqual(info["CFBundleIconFile"], "deckcraft")
+        package = (ROOT / "packaging/macos/package.sh").read_text()
+        self.assertIn('cp "$ROOT/assets/app-icon/deckcraft.icns" "$APP/Contents/Resources/deckcraft.icns"', package)
+        self.assertTrue((ROOT / "assets/app-icon/deckcraft.icns").is_file())
 
     def test_windows_capabilities(self):
         self.assert_registry(CAPABILITIES, "ApplicationName", "Trình chiếu – ERPCons")
