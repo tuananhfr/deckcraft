@@ -20,6 +20,7 @@ mod logging;
 mod settings;
 
 use deckcraft_engine::Session;
+use deckcraft_ui_egui::i18n;
 use deckcraft_ui_egui::{Services, SlideApp};
 
 struct App(SlideApp, String);
@@ -102,25 +103,41 @@ fn save_prefs(app: &SlideApp) {
 }
 
 fn services() -> Services {
+    let clipboard = std::rc::Rc::new(std::cell::RefCell::new(arboard::Clipboard::new().ok()));
+    let copy_clipboard = clipboard.clone();
+    let html_clipboard = clipboard.clone();
     Services {
+        set_clipboard_html: Some(Box::new(move |html, text| {
+            copy_clipboard.borrow_mut().as_mut().is_some_and(|cb| cb.set_html(html, Some(text)).is_ok())
+        })),
+        clipboard_html: Some(Box::new(move || html_clipboard.borrow_mut().as_mut()?.get().html().ok())),
+        clipboard_text: Some(Box::new(move || clipboard.borrow_mut().as_mut()?.get_text().ok())),
         pick_open: Some(Box::new(|purpose: &str| {
             let d = rfd::FileDialog::new();
             let d = match purpose {
-                "picture" => d.add_filter("Pictures", &["png", "jpg", "jpeg", "gif", "webp", "bmp", "tif", "tiff"]),
+                "picture" => d.add_filter(i18n::t("Pictures"), &["png", "jpg", "jpeg", "gif", "webp", "bmp", "tif", "tiff"]),
                 "audio" => d.add_filter(
-                    "Audio",
+                    i18n::t("Audio"),
                     &["wav", "mp3", "m4a", "m4b", "aac", "flac", "ogg", "oga", "opus", "aif", "aiff", "aifc", "caf", "wma", "weba", "mka"],
                 ),
-                "video" => d.add_filter("Video", &["mp4", "m4v", "mov", "webm", "mkv", "wmv"]),
+                "video" => d.add_filter(i18n::t("Video"), &["mp4", "m4v", "mov", "webm", "mkv", "wmv"]),
                 _ => d
-                    .add_filter("Presentations", &["deckcraft", "pptx", "potx", "ppsx", "ppt", "pptm", "odp"])
-                    .add_filter("DeckCraft", &["deckcraft"])
+                    .add_filter(i18n::t("Presentations"), &["deckcraft", "pptx", "potx", "ppsx", "ppt", "pptm", "odp"])
+                    .add_filter(i18n::t("DeckCraft presentation"), &["deckcraft"])
                     .add_filter("PowerPoint", &["pptx", "potx", "ppsx", "ppt", "pptm"])
-                    .add_filter("Outline", &["txt", "md"]),
+                    .add_filter(i18n::t("Outline"), &["txt", "md"]),
             };
             d.pick_file().map(|p| p.to_string_lossy().to_string())
         })),
-        pick_save: Some(Box::new(|name: &str| rfd::FileDialog::new().set_file_name(name).save_file().map(|p| p.to_string_lossy().to_string()))),
+        pick_save: Some(Box::new(|name: &str| {
+            let dialog = rfd::FileDialog::new().set_file_name(name);
+            let dialog = match std::path::Path::new(name).extension().and_then(|ext| ext.to_str()) {
+                Some("pptx") => dialog.add_filter("PowerPoint", &["pptx"]).add_filter(i18n::t("DeckCraft presentation"), &["deckcraft"]),
+                Some("deckcraft") => dialog.add_filter(i18n::t("DeckCraft presentation"), &["deckcraft"]).add_filter("PowerPoint", &["pptx"]),
+                _ => dialog,
+            };
+            dialog.save_file().map(|p| p.to_string_lossy().to_string())
+        })),
         read: Some(Box::new(|p: &str| std::fs::read(p).map_err(|e| e.to_string()))),
         write: Some(Box::new(|p: &str, b: &[u8]| std::fs::write(p, b).map_err(|e| e.to_string()))),
         clipboard_image: Some(Box::new(|| {
@@ -137,6 +154,15 @@ fn services() -> Services {
             .then(|| Box::new(audio::CpalOut::default()) as Box<dyn deckcraft_media::AudioOut>),
         ..Default::default()
     }
+}
+
+fn recovery_message(n: usize) -> String {
+    let template = if n == 1 {
+        i18n::t("Recovered {n} unsaved presentation from the last session")
+    } else {
+        i18n::t("Recovered {n} unsaved presentations from the last session")
+    };
+    i18n::fmt(template, &[("n", &n.to_string())])
 }
 
 const APP_ID: &str = "ai.storyteller.deckcraft";
@@ -211,13 +237,28 @@ fn main() -> eframe::Result {
         Box::new(move |cc| {
             let mut app = SlideApp::new(Session::new(), services());
             load_prefs(&mut app);
+            i18n::set_current(i18n::Lang::from_pref(&app.ui.language));
             // AutoRecover: reopen what a previous run left unsaved, then keep it current.
             if std::env::var_os("DECKCRAFT_NO_RECOVERY").is_none() {
                 app.session.recovery_dir = deckcraft_engine::recovery::default_dir();
-                if let Ok(v) = app.session.execute("file.recovery.open", &serde_json::json!({}))
-                    && let Some(n) = v.get("opened").and_then(|o| o.as_array()).map(Vec::len).filter(|n| *n > 0)
-                {
-                    app.set_status(format!("Recovered {n} unsaved presentation{} from the last session", if n == 1 { "" } else { "s" }));
+                match app.session.execute("file.recovery.open", &serde_json::json!({})) {
+                    Ok(v) => {
+                        if let Some(n) = v.get("opened").and_then(|o| o.as_array()).map(Vec::len).filter(|n| *n > 0) {
+                            app.set_status(recovery_message(n));
+                        }
+                    }
+                    Err(e) => {
+                        log::warn!("recovery: {e}");
+                        let message = i18n::t(
+                            "Some unsaved presentations could not be recovered. Their recovery files remain on disk; close presentations and restart to try again.",
+                        );
+                        app.set_status(message);
+                        rfd::MessageDialog::new()
+                            .set_title(i18n::t("Presentation recovery"))
+                            .set_description(message)
+                            .set_level(rfd::MessageLevel::Warning)
+                            .show();
+                    }
                 }
             }
             app.integrated_titlebar = cfg!(target_os = "macos");
@@ -240,4 +281,19 @@ fn main() -> eframe::Result {
             Ok(Box::new(App(app, language)))
         }),
     )
+}
+
+#[cfg(test)]
+mod desktop_tests {
+    use super::*;
+
+    #[test]
+    fn recovery_counts_are_translated() {
+        i18n::set_current(i18n::Lang::EN);
+        assert_eq!(recovery_message(1), "Recovered 1 unsaved presentation from the last session");
+        assert_eq!(recovery_message(2), "Recovered 2 unsaved presentations from the last session");
+        i18n::set_current(i18n::Lang::from_pref("vi"));
+        assert_eq!(recovery_message(2), "Đã khôi phục 2 bản trình chiếu chưa lưu từ phiên trước");
+        i18n::set_current(i18n::Lang::EN);
+    }
 }

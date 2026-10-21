@@ -401,6 +401,21 @@ impl SlideApp {
         if self.request_clipboard_for_command(id, &params) {
             return Ok(Value::Null);
         }
+        #[cfg(not(target_arch = "wasm32"))]
+        let params = if id == "edit.paste" && params.get("text").is_none() && params.get("html").is_none() {
+            let mut params = params;
+            if let Some(object) = params.as_object_mut() {
+                if let Some(html) = self.services.clipboard_html.as_mut().and_then(|read| read()) {
+                    object.insert("html".into(), json!(html));
+                }
+                if let Some(text) = self.services.clipboard_text.as_mut().and_then(|read| read()) {
+                    object.insert("text".into(), json!(text));
+                }
+            }
+            params
+        } else {
+            params
+        };
         // Zoom commands act on the presentation shown, even one switched to since the last frame.
         self.sync_doc_view();
         let open_before = self.session.documents().len();
@@ -880,6 +895,16 @@ impl SlideApp {
     /// Format Save writes when nothing names one. A host with only a download sink (the web) gets
     /// .pptx, which people can open again anywhere; ERPCons decision 2026-10-14.
     fn default_save_format(&self) -> &'static str {
+        #[cfg(not(target_arch = "wasm32"))]
+        if self.services.pick_save.is_some() && !self.session.active().is_some_and(|d| d.save_as_pptx) {
+            return self
+                .session
+                .active()
+                .and_then(|d| d.path.as_deref())
+                .map(deckcraft_engine::cmd::file::format_for_path)
+                .filter(|format| matches!(*format, "pptx" | "deckcraft"))
+                .unwrap_or("pptx");
+        }
         if self.session.active().is_some_and(|d| d.save_as_pptx) || (self.services.pick_save.is_none() && self.services.download.is_some()) {
             "pptx"
         } else {
@@ -1631,8 +1656,28 @@ mod tests {
         assert!(docs[0].is_dirty());
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     #[test]
-    fn desktop_save_as_still_suggests_deckcraft() {
+    fn desktop_paste_command_reads_host_html() {
+        let reads = std::rc::Rc::new(std::cell::Cell::new(0));
+        let seen = reads.clone();
+        let services = Services {
+            clipboard_html: Some(Box::new(move || {
+                seen.set(seen.get() + 1);
+                Some("<p><b>Rich paste</b></p>".into())
+            })),
+            clipboard_text: Some(Box::new(|| Some("Rich paste".into()))),
+            ..Default::default()
+        };
+        let mut app = SlideApp::new(Session::with_new(), services);
+        app.run("edit.paste", json!({})).unwrap();
+        assert_eq!(reads.get(), 1);
+        app.run("edit.paste", json!({"text": "Explicit paste"})).unwrap();
+        assert_eq!(reads.get(), 1, "explicit paste payload must bypass host reads");
+    }
+
+    #[test]
+    fn desktop_save_as_suggests_pptx_and_preserves_opened_formats() {
         let asked: std::rc::Rc<std::cell::RefCell<Vec<String>>> = Default::default();
         let seen = asked.clone();
         let services = Services {
@@ -1644,7 +1689,12 @@ mod tests {
         };
         let mut app = SlideApp::new(Session::with_new(), services);
         app.save();
-        assert!(asked.borrow().first().is_some_and(|s| s.ends_with(".deckcraft")), "{:?}", asked.borrow());
+        assert!(asked.borrow().first().is_some_and(|s| s.ends_with(".pptx")), "{:?}", asked.borrow());
+        for format in ["deckcraft", "pptx"] {
+            app.session.active_mut().unwrap().path = Some(format!("talk.{format}"));
+            app.run("app.saveAsDialog", json!({})).unwrap();
+            assert!(asked.borrow().last().is_some_and(|s| s.ends_with(&format!(".{format}"))));
+        }
     }
 
     #[test]

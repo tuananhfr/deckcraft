@@ -1,5 +1,10 @@
 # ERPCons changes
 
+- Rich clipboard (desktop): copy HTML with plain text and read native HTML on paste through arboard, with plain-text fallback and existing session clipboard preservation.
+- Save picker (desktop): default new presentations to .pptx, retain opened formats and offer .deckcraft alongside .pptx; keep loss warnings.
+- Recovery notices (desktop): show a translated warning on recovery failure and translate recovered presentation counts.
+- File dialogs (desktop): translate presentation, picture, audio and outline filters into Vietnamese.
+
 - Selected-object typing (both): keep table typing in the first selected cell (or the first cell of the whole table), including IME input; ignore typing and IME on pictures and other objects without text instead of showing raw command errors.
 - Light-theme inputs (both): use existing palette tokens for visible input, checkbox and combo-box borders and checkmarks, with at least 3:1 contrast against panels and fields; dark-theme visuals are unchanged.
 - Vietnamese product name (both): translate the product name as "Trình chiếu" throughout the Vietnamese catalog, preserving the original copyright credit; add a catalog regression check.

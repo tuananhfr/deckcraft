@@ -1467,3 +1467,9 @@
 	Open it in PowerPoint or LibreOffice, save it as .pptx, then open it again.	Hãy mở bằng PowerPoint hoặc LibreOffice, lưu thành .pptx rồi mở lại.
 	Choose a .pptx file to preserve the legacy original.	Hãy chọn tệp .pptx để giữ nguyên tệp gốc ở định dạng cũ.
 	DeckCraft	Trình chiếu
+	Outline	Dàn bài
+	DeckCraft presentation	Tệp Trình chiếu
+	Presentation recovery	Khôi phục bản trình chiếu
+	Recovered {n} unsaved presentation from the last session	Đã khôi phục {n} bản trình chiếu chưa lưu từ phiên trước
+	Recovered {n} unsaved presentations from the last session	Đã khôi phục {n} bản trình chiếu chưa lưu từ phiên trước
+	Some unsaved presentations could not be recovered. Their recovery files remain on disk; close presentations and restart to try again.	Không thể khôi phục một số bản trình chiếu chưa lưu. Các tệp khôi phục vẫn còn trên đĩa; hãy đóng bớt bản trình chiếu và khởi động lại để thử lại.
