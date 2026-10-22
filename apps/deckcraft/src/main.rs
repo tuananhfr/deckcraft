@@ -20,6 +20,7 @@ mod control_server;
 mod graphics;
 mod logging;
 mod settings;
+mod updates;
 
 use deckcraft_engine::Session;
 use deckcraft_ui_egui::i18n;
@@ -193,6 +194,9 @@ fn app_icon() -> Option<egui::IconData> {
 }
 
 fn main() -> eframe::Result {
+    if let Some(code) = erpcons_update::run_helper_from_args() {
+        std::process::exit(code);
+    }
     // First, so every start-up record (and the engine's panic hook, installed with the first
     // Session) is captured; see `logging`.
     let logger = logging::install();
@@ -268,6 +272,9 @@ fn main() -> eframe::Result {
                     egui::TextureOptions::LINEAR,
                 )
             });
+            if let Some(dir) = config_dir() {
+                app.update_hook = Some(std::sync::Arc::new(updates::DesktopUpdates::new(dir.join("update-state.json"))));
+            }
             load_prefs(&mut app);
             i18n::set_current(i18n::Lang::from_pref(&app.ui.language));
             // AutoRecover: reopen what a previous run left unsaved, then keep it current.

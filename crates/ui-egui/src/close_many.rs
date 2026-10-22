@@ -19,6 +19,8 @@ pub enum After {
     Stay,
     /// The window closes too (the desktop app quits).
     Quit,
+    #[cfg(not(target_arch = "wasm32"))]
+    Update,
 }
 
 pub struct CloseBatch {
@@ -123,6 +125,13 @@ impl SlideApp {
 
     /// Closes the batch's presentations and, for a quit, the window.
     fn finish(&mut self, b: &CloseBatch, ctx: &egui::Context) {
+        #[cfg(not(target_arch = "wasm32"))]
+        if b.after == After::Update {
+            if !self.has_unsaved_changes() {
+                self.continue_update(ctx);
+            }
+            return;
+        }
         // A presentation still unsaved here (edited from elsewhere since) stays open.
         let closing: Vec<u64> = b.targets.iter().copied().filter(|uid| !self.unsaved(*uid)).collect();
         self.close_now(&closing);
@@ -133,6 +142,11 @@ impl SlideApp {
     }
 
     fn discard_and_finish(&mut self, b: &CloseBatch, ctx: &egui::Context) {
+        #[cfg(not(target_arch = "wasm32"))]
+        if b.after == After::Update {
+            self.continue_update(ctx);
+            return;
+        }
         let targets = b.targets.clone();
         self.close_now(&targets);
         if b.after == After::Quit {

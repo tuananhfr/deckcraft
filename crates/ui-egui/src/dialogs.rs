@@ -733,6 +733,8 @@ fn body(app: &mut SlideApp, ui: &mut Ui, d: &mut Dialog) -> bool {
             ok
         }
         "preferences" => {
+            #[cfg(not(target_arch = "wasm32"))]
+            crate::updates::preferences(ui, app);
             ui.label(egui::RichText::new(crate::tl!("General")).font(theme::bold(13.0)));
             let mut dark = app.ui.brightness == theme::Brightness::Dark;
             if ui.checkbox(&mut dark, crate::tl!("Dark appearance")).changed() {

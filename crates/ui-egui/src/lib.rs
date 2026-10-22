@@ -45,6 +45,8 @@ pub mod thumbs;
 pub mod toast;
 pub mod touch;
 pub mod uifonts;
+#[cfg(not(target_arch = "wasm32"))]
+pub mod updates;
 pub mod widgets;
 
 /// An English UI string in the current interface language ([`i18n::t`]).
@@ -225,6 +227,8 @@ pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
     ("app.find", "Find…", Some("Cmd+F"), "{text?}"),
     ("app.replace", "Replace…", Some("Cmd+H"), "{text?}"),
     ("app.shortcuts", "Keyboard Shortcuts", Some("F1"), "{}"),
+    #[cfg(not(target_arch = "wasm32"))]
+    ("help.check_updates", "Check for updates", None, "{}"),
     ("app.preferences", "Preferences…", Some("Cmd+,"), "{}"),
     ("app.openDialog", "Open…", None, "{purpose?}"),
     ("app.insertPictureDialog", "Picture from File…", None, "{}"),
@@ -308,6 +312,10 @@ pub struct SlideApp {
     pub layout: narrow::NarrowLayout,
     pub touch: touch::TouchInput,
     pub(crate) canvas_touch: touch::CanvasTouch,
+    #[cfg(not(target_arch = "wasm32"))]
+    pub update_hook: Option<std::sync::Arc<dyn updates::UpdateHook>>,
+    #[cfg(not(target_arch = "wasm32"))]
+    updates: updates::Updates,
     /// Close All, Close Others or quitting, while its prompt is open.
     pub(crate) close_batch: Option<close_many::CloseBatch>,
     /// Saving and failed saves, for the title bar.
@@ -373,6 +381,10 @@ impl SlideApp {
             layout: Default::default(),
             touch: Default::default(),
             canvas_touch: Default::default(),
+            #[cfg(not(target_arch = "wasm32"))]
+            update_hook: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            updates: Default::default(),
             close_batch: None,
             save_status: Default::default(),
             loss_warning: Default::default(),
@@ -733,6 +745,8 @@ impl SlideApp {
                 self.find.open(id == "app.replace", text);
             }
             "app.shortcuts" => self.dialog = Some(dialogs::Dialog::new("shortcuts")),
+            #[cfg(not(target_arch = "wasm32"))]
+            "help.check_updates" => self.check_for_updates(),
             "app.preferences" => self.dialog = Some(dialogs::Dialog::new("preferences")),
             "app.openDialog" => self.pick_and_open(),
             "app.insertPictureDialog" => self.pick_and_insert("picture", "insert.picture"),
@@ -1054,6 +1068,8 @@ impl SlideApp {
     /// Per-frame logic before layout: styles, control requests, screenshots, shortcuts.
     pub fn logic(&mut self, ctx: &egui::Context) {
         i18n::set_current(i18n::Lang::from_pref(&self.ui.language));
+        #[cfg(not(target_arch = "wasm32"))]
+        self.poll_updates(ctx);
         let scale = self.ui.ui_scale.clamp(0.5, 3.0);
         if (ctx.zoom_factor() - scale).abs() > 1e-3 {
             ctx.set_zoom_factor(scale);
@@ -1322,6 +1338,8 @@ impl SlideApp {
         toast::note_missing_fonts(self);
         toast::show(self, &ctx);
         dialogs::show(self, &ctx);
+        #[cfg(not(target_arch = "wasm32"))]
+        updates::dialog(self, &ctx);
         find::show(self, &ctx);
         menus::palette(self, &ctx);
         for url in std::mem::take(&mut self.pending_urls) {
@@ -2059,3 +2077,6 @@ mod tests {
         assert_eq!(harness.state().textures.canvas_renders, n, "an unchanged slide isn't rendered again");
     }
 }
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod update_tests;

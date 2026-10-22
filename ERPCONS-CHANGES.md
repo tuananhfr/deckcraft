@@ -1,5 +1,7 @@
 # ERPCons changes
 
+- Desktop updates: check signed ERPCons releases automatically or from Help, preserve unsaved presentations, and download, verify and restart with installation notices and a settings preference.
+
 - Finder open (macOS desktop): handle document and quit Apple events through the existing open and close paths; register .deckcraft, .pptx, .potx and .ppsx with document icons.
 
 - Default apps (Windows): list Trình chiếu – ERPCons in Settings > Default apps for .deckcraft, .pptx, .potx and .ppsx; it still owns only .deckcraft and never takes over PowerPoint formats.

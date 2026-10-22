@@ -11,6 +11,7 @@ default-run = "deckcraft"
 workspace = true
 
 [dependencies]
+erpcons-update = { git = "https://github.com/tuananhfr/erpcons-update", tag = "v0.1.0" }
 deckcraft-engine = { workspace = true }
 deckcraft-ui-egui = { workspace = true }
 deckcraft-media = { workspace = true }

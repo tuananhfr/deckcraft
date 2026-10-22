@@ -272,6 +272,15 @@ pub fn menu_tree() -> Vec<(&'static str, Vec<(&'static str, &'static str)>)> {
                 ("Set Up Show…", "show.setup"),
             ],
         ),
-        ("Help", vec![("About DeckCraft", "app.about"), ("Keyboard Shortcuts", "app.shortcuts"), ("Command Palette", "app.palette")]),
+        ("Help", {
+            let items = vec![("About DeckCraft", "app.about"), ("Keyboard Shortcuts", "app.shortcuts"), ("Command Palette", "app.palette")];
+            #[cfg(not(target_arch = "wasm32"))]
+            let items = {
+                let mut items = items;
+                items.push(("Check for updates", "help.check_updates"));
+                items
+            };
+            items
+        }),
     ]
 }
