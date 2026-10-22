@@ -144,6 +144,11 @@ jobs:
           cp "dist/release/ERPCons-TrinhChieu-$DECKCRAFT_VERSION-linux-x86_64.AppImage" release-files/ERPCons-TrinhChieu-linux-x86_64.AppImage
           cp "dist/release/ERPCons-TrinhChieu-$DECKCRAFT_VERSION-linux-x86_64.deb" release-files/erpcons-trinhchieu_amd64.deb
           cp "dist/release/ERPCons-TrinhChieu-$DECKCRAFT_VERSION-linux-x86_64.rpm" release-files/erpcons-trinhchieu.x86_64.rpm
+      - name: Generate desktop SBOM
+        run: |
+          python3 -m unittest discover -s packaging/sbom -v
+          python3 packaging/sbom/cargo_sbom.py --target x86_64-unknown-linux-gnu \
+            --output "release-files/deckcraft-$DECKCRAFT_VERSION.cdx.json"
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: erpcons-desktop-linux

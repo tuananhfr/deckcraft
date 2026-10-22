@@ -1,5 +1,6 @@
 # ERPCons changes
 
+- Desktop releases: publish a deterministic CycloneDX 1.5 Cargo dependency SBOM with licenses, lockfile checksums and dependency edges, included in release SHA256SUMS.
 - Document drafts (web): report per-document revisions, dirty, pending, committed and failed checkpoints to the optional ERPCons shell v2 bridge, including tab switches and restored draft ids.
 
 - Media sound (web): audio and video soundtracks play through a Web Audio output (short buffers scheduled at the context's rate, unlocked by the gesture that starts playback); when the browser blocks or loses audio, audible media pause with a translated retry notice, shown once per failure, instead of playing silently. Desktop is unchanged.
