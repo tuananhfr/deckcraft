@@ -247,8 +247,12 @@ fn mark_saved(s: &mut Session, path: Option<String>) -> Result<()> {
     }
     st.revision += 1;
     let uid = st.uid;
+    let source = st.recovery_source.take();
     if let Some(dir) = &s.recovery_dir {
         crate::recovery::discard(dir, uid);
+        if let Some(source) = source {
+            crate::recovery::discard(dir, source);
+        }
     }
     Ok(())
 }

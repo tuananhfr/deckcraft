@@ -196,6 +196,7 @@ pub struct DocState {
     pub saved_doc: Arc<Presentation>,
     pub interaction: Option<Interaction>,
     pub uid: u64,
+    pub(crate) recovery_source: Option<u64>,
     pub title: String,
     /// Fonts the file's text uses that aren't installed, found when it was opened (empty for new
     /// documents); the app mentions them once.
@@ -224,6 +225,7 @@ impl DocState {
             revision: 1,
             interaction: None,
             uid: NEXT_UID.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+            recovery_source: None,
             title,
             missing_fonts: Vec::new(),
             save_as_pptx,
@@ -483,7 +485,7 @@ impl Session {
             let d = self.docs.remove(i);
             self.closed.record(&d);
             if let Some(dir) = &self.recovery_dir {
-                recovery::discard(dir, d.uid);
+                recovery::discard_document(dir, &d);
             }
             self.active = match self.active {
                 _ if self.docs.is_empty() => None,

@@ -1,5 +1,7 @@
 # ERPCons changes
 
+- AutoRecover (both): retain recovered records until a durable checkpoint or explicit save/discard, deduplicate related checkpoints and fall back from corrupt newer records.
+
 - Point the website links (About, installers, release notes) to https://office.erpcons.ai; app ids keep the `vn.erpcons.*` form.
 - Desktop updates: check signed ERPCons releases automatically or from Help, preserve unsaved presentations, and download, verify and restart with installation notices and a settings preference; Windows MSI installation waits for Install now or Cancel.
 
