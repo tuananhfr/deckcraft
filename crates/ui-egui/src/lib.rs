@@ -1781,7 +1781,7 @@ mod tests {
             harness.run_steps(2);
             assert!(harness.query_by_label("Trình chiếu – ERPCons").is_some());
             assert!(harness.query_by_label("ERPCons").is_some());
-            assert!(harness.query_by_label("https://office.erpcons.vn").is_some());
+            assert!(harness.query_by_label("https://office.erpcons.ai").is_some());
             assert!(harness.query_by_label("ERPCons Văn phòng — dựa trên DeckCraft của nhóm ArtCraft. MIT OR Apache-2.0.").is_some());
             if let Ok(dir) = std::env::var("DECKCRAFT_BRANDING_SCREENSHOTS") {
                 let suffix = if lang == i18n::Lang::EN { "en" } else { "vi" };

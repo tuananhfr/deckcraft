@@ -29,7 +29,7 @@
 
     <Icon Id="DeckcraftIcon.ico" SourceFile="$(var.IconPath)" />
     <Property Id="ARPPRODUCTICON" Value="DeckcraftIcon.ico" />
-    <Property Id="ARPURLINFOABOUT" Value="https://office.erpcons.vn" />
+    <Property Id="ARPURLINFOABOUT" Value="https://office.erpcons.ai" />
     <Property Id="ARPURLUPDATEINFO" Value="https://github.com/tuananhfr/deckcraft/releases" />
     <Property Id="ARPHELPLINK" Value="https://github.com/tuananhfr/deckcraft/issues" />
 

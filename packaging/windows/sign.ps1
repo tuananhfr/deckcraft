@@ -55,7 +55,7 @@ if (-not $haveCert -and -not $haveAzure) {
 }
 
 $script:SignTool = Find-SignTool
-$common = @('sign', '/v', '/fd', 'SHA256', '/td', 'SHA256', '/d', 'Trình chiếu – ERPCons', '/du', 'https://office.erpcons.vn')
+$common = @('sign', '/v', '/fd', 'SHA256', '/td', 'SHA256', '/d', 'Trình chiếu – ERPCons', '/du', 'https://office.erpcons.ai')
 $tmp = Join-Path ([IO.Path]::GetTempPath()) "deckcraft-sign-$PID"
 New-Item -ItemType Directory -Force -Path $tmp | Out-Null
 

@@ -819,7 +819,7 @@ pub fn about(app: &mut SlideApp, ui: &mut Ui) {
         ui.add_space(6.0);
         if app.product_name != "DeckCraft" {
             ui.label("ERPCons");
-            ui.hyperlink_to("https://office.erpcons.vn", "https://office.erpcons.vn");
+            ui.hyperlink_to("https://office.erpcons.ai", "https://office.erpcons.ai");
         }
         ui.label("ERPCons Văn phòng — dựa trên DeckCraft của nhóm ArtCraft. MIT OR Apache-2.0.");
         ui.add_space(6.0);
