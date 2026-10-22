@@ -528,12 +528,14 @@ mod history_button_tests {
             ],
             ..Default::default()
         };
-        let _ = ctx.run_ui(input, |ui| {
+        let mut output = ctx.run_ui(input, |ui| {
             let response = icon_toggle_sized(ui, Icon::Undo, "Undo (⌘Z)", false, false, vec2(44.0, 44.0));
             assert!(!response.enabled());
             assert!(!response.hovered());
             assert!(!response.is_pointer_button_down_on());
             assert!(!response.clicked());
         });
+        // Debug builds panic when a frame's texture deltas are dropped unapplied.
+        output.textures_delta.clear();
     }
 }
