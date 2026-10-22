@@ -1037,6 +1037,7 @@ dependencies = [
  "deckcraft-text",
  "i_overlay",
  "image",
+ "js-sys",
  "log",
  "quick-xml 0.38.4",
  "serde",

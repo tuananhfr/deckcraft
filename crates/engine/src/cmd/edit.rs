@@ -36,12 +36,18 @@ fn restore(s: &mut Session, redo: bool) -> Result<Value> {
     let st = s.doc_mut()?;
     let (from, to) = if redo { (&mut st.history.redo, &mut st.history.undo) } else { (&mut st.history.undo, &mut st.history.redo) };
     let Some(e) = from.pop() else { return ok() };
-    to.push(HistoryEntry { label: e.label.clone(), doc: st.doc.clone(), selection: st.selection.clone() });
+    to.push(HistoryEntry {
+        transaction_id: e.transaction_id,
+        timestamp: e.timestamp,
+        label: e.label.clone(),
+        doc: st.doc.clone(),
+        selection: st.selection.clone(),
+    });
     st.doc = e.doc;
     st.selection = e.selection;
     st.interaction = None;
     st.revision += 1;
-    Ok(json!({"label": e.label}))
+    Ok(json!({"label": e.label, "transaction_id": e.transaction_id, "timestamp": e.timestamp}))
 }
 
 fn undo(s: &mut Session, _p: &Value) -> Result<Value> {

@@ -106,10 +106,9 @@ pub enum TitleItem {
     Comments,
     PlayFromStart,
     Home,
-    Redo,
 }
 
-pub const TITLE_DROP_ORDER: [TitleItem; 5] = [TitleItem::Appearance, TitleItem::Comments, TitleItem::PlayFromStart, TitleItem::Home, TitleItem::Redo];
+pub const TITLE_DROP_ORDER: [TitleItem; 4] = [TitleItem::Appearance, TitleItem::Comments, TitleItem::PlayFromStart, TitleItem::Home];
 
 /// How many of [`TITLE_DROP_ORDER`] a narrow title bar hides.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -228,7 +227,7 @@ mod tests {
     #[test]
     fn title_controls_give_way_lowest_priority_first() {
         assert!(TITLE_DROP_ORDER.iter().all(|&o| TitleFit::new(1366.0, 250.0, widths).shows(o)));
-        let fit = TitleFit::new(330.0, 250.0, widths);
+        let fit = TitleFit::new(304.0, 250.0, widths);
         assert!(!fit.shows(TitleItem::Appearance) && !fit.shows(TitleItem::Comments) && fit.shows(TitleItem::PlayFromStart));
         let mut last = 0;
         for available in (150..=600).rev().step_by(5) {

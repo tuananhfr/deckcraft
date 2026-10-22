@@ -402,3 +402,86 @@ fn keys_never_panic_on_any_text() {
         }
     }
 }
+
+#[test]
+fn undo_redo_aliases_restore_snapshots() {
+    for mac in [false, true] {
+        for slides in [false, true] {
+            let mut s = Session::with_new();
+            s.mac_keys = mac;
+            let before = s.doc().unwrap().doc.clone();
+            s.execute(if slides { "slide.new" } else { "insert.textBox" }, &json!({"text": "Undo me"})).unwrap();
+            let after = s.doc().unwrap().doc.clone();
+            for (key, mods) in [("y", CTRL), ("z", CTRL_SHIFT)] {
+                press(&mut s, "z", CTRL);
+                assert_eq!(*s.doc().unwrap().doc, *before);
+                press(&mut s, key, mods);
+                assert_eq!(*s.doc().unwrap().doc, *after);
+            }
+        }
+    }
+}
+
+#[test]
+fn undo_history_reports_metadata() {
+    let mut s = Session::with_new();
+    s.execute("slide.new", &json!({})).unwrap();
+    let v = s.execute("document.inspect", &json!({})).unwrap();
+    assert!(v["history"]["undo"][0]["transaction_id"].as_u64().is_some_and(|id| id > 0));
+    assert!(v["history"]["undo"][0]["timestamp"].as_u64().is_some());
+}
+
+#[test]
+fn undo_transactions_keep_metadata_across_restore_and_branching() {
+    let mut s = Session::with_new();
+    s.doc_mut().unwrap().history_clock = || 1_234_567;
+    let count = s.doc().unwrap().history.undo.len();
+    let journal_count = s.journal.len();
+    s.execute("insert.smartArt", &json!({"kind": "list", "items": ["One", "Two"]})).unwrap();
+    assert_eq!(s.doc().unwrap().history.undo.len(), count + 1);
+    assert_eq!(s.journal.len(), journal_count + 1, "nested group and rename share the outer transaction");
+    let e = s.doc().unwrap().history.undo.last().unwrap();
+    let id = e.transaction_id;
+    assert_eq!(e.timestamp, 1_234_567);
+    assert_eq!(s.journal.last().unwrap().transaction_id, id);
+    assert_eq!(s.journal.last().unwrap().timestamp, e.timestamp);
+    s.execute("edit.undo", &json!({})).unwrap();
+    let e = s.doc().unwrap().history.redo.last().unwrap();
+    assert_eq!((e.transaction_id, e.timestamp), (id, 1_234_567));
+    s.execute("edit.redo", &json!({})).unwrap();
+    assert_eq!(s.doc().unwrap().history.undo.last().unwrap().transaction_id, id);
+    s.execute("edit.undo", &json!({})).unwrap();
+    s.execute("slide.new", &json!({})).unwrap();
+    assert!(s.doc().unwrap().history.redo.is_empty());
+    let branch_id = s.doc().unwrap().history.undo.last().unwrap().transaction_id;
+    assert!(branch_id > id);
+    s.execute("file.new", &json!({})).unwrap();
+    s.doc_mut().unwrap().history_clock = || 42;
+    s.execute("slide.new", &json!({})).unwrap();
+    let e = s.doc().unwrap().history.undo.last().unwrap();
+    assert_eq!(e.timestamp, 42);
+    assert!(e.transaction_id < branch_id, "each document has its own sequence");
+    s.set_active(0);
+    assert_eq!(s.doc().unwrap().history.undo.last().unwrap().transaction_id, branch_id);
+}
+
+#[test]
+fn pointer_gesture_is_one_timestamped_transaction() {
+    use crate::tools::{PointerEvent, PointerKind};
+    let mut s = Session::with_new();
+    s.doc_mut().unwrap().history_clock = || 123;
+    s.execute("shape.insert", &json!({"preset": "rect", "rect": [50, 50, 100, 100]})).unwrap();
+    let before = s.doc().unwrap().doc.clone();
+    let count = s.doc().unwrap().history.undo.len();
+    for (kind, x, y) in [(PointerKind::Down, 100.0, 100.0), (PointerKind::Drag, 200.0, 180.0), (PointerKind::Up, 200.0, 180.0)] {
+        s.pointer(PointerEvent { kind, x, y, mods: NONE, tol: 3.0 }).unwrap();
+    }
+    let st = s.doc().unwrap();
+    assert_eq!(st.history.undo.len(), count + 1);
+    let e = st.history.undo.last().unwrap();
+    assert_eq!(e.timestamp, 123);
+    assert_eq!(*e.doc, *before);
+    assert!(e.transaction_id > st.history.undo[count - 1].transaction_id);
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(*s.doc().unwrap().doc, *before);
+}

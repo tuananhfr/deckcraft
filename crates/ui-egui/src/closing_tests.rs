@@ -494,7 +494,7 @@ fn phone_close_button_uses_the_close_dialog_on_desktop_and_web() {
         h.run_steps(3);
         let button = h.get_by_label("Đóng tài liệu");
         assert!(button.rect().left() >= 0.0 && button.rect().right() <= 390.0);
-        assert!(button.rect().top() >= 0.0 && button.rect().bottom() <= crate::ribbon::TITLE_H);
+        assert!(button.rect().top() >= 0.0 && button.rect().bottom() <= crate::ribbon::NARROW_TITLE_H);
         button.click();
         h.run_steps(3);
         assert_eq!(dialog(&h).as_deref(), Some("close"));

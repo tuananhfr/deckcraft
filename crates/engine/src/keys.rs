@@ -8,7 +8,7 @@ use crate::{Result, Session};
 
 /// Second shortcuts for commands, kept from earlier versions or other platforms (the registry
 /// holds one per command). Checked after the registry.
-pub const EXTRA_SHORTCUTS: &[(&str, &str)] = &[("Cmd+Shift+N", "slide.new")];
+pub const EXTRA_SHORTCUTS: &[(&str, &str)] = &[("Cmd+Shift+N", "slide.new"), ("Cmd+Shift+Z", "edit.redo")];
 
 /// A shortcut like `Cmd+Shift+]` split into its key, spelled as [`key_token`] spells it, and its
 /// modifiers (`Cmd` and `Ctrl` are the same modifier).

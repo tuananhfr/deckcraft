@@ -145,9 +145,31 @@ pub struct Selection {
 
 #[derive(Clone, Debug)]
 pub struct HistoryEntry {
+    pub transaction_id: u64,
+    pub timestamp: u64,
     pub label: String,
     pub doc: Arc<Presentation>,
     pub selection: Selection,
+}
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+pub struct JournalEntry {
+    pub command: String,
+    pub params: Value,
+    pub transaction_id: u64,
+    pub timestamp: u64,
+}
+
+/// Unix milliseconds; hosts and tests may supply a clock on each document.
+fn history_timestamp() -> u64 {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX)).unwrap_or(0)
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        js_sys::Date::now() as u64
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -191,6 +213,8 @@ pub struct DocState {
     pub doc: Arc<Presentation>,
     pub selection: Selection,
     pub history: History,
+    pub history_clock: fn() -> u64,
+    next_transaction_id: u64,
     pub path: Option<String>,
     pub revision: u64,
     pub saved_doc: Arc<Presentation>,
@@ -221,6 +245,8 @@ impl DocState {
             doc,
             selection: Selection::default(),
             history: History { limit: 500, ..Default::default() },
+            history_clock: history_timestamp,
+            next_transaction_id: 0,
             path,
             revision: 1,
             interaction: None,
@@ -371,7 +397,7 @@ pub struct Session {
     docs: Vec<DocState>,
     active: Option<usize>,
     pub prefs: Prefs,
-    pub journal: Vec<(String, Value)>,
+    pub journal: Vec<JournalEntry>,
     pub clipboard: Clipboard,
     pub ui_requests: Vec<UiRequest>,
     pub tool: tools::ToolState,
@@ -527,6 +553,7 @@ impl Session {
         if let Some(st) = self.active_mut() {
             clamp_selection(st);
         }
+        let mut transaction = None;
         if let (Some((uid, old, sel)), Some(st)) = (before, self.active_mut())
             && st.uid == uid
             && !Arc::ptr_eq(&old, &st.doc)
@@ -534,10 +561,14 @@ impl Session {
             && spec.undoable
             && outer
         {
-            push_undo(st, HistoryEntry { label: spec.label.to_string(), doc: old, selection: sel });
+            transaction = Some(push_undo(st, spec.label.to_string(), old, sel));
         }
         if spec.journal && outer {
-            self.journal.push((id.to_string(), params.clone()));
+            let (transaction_id, timestamp) = match transaction {
+                Some(metadata) => metadata,
+                None => self.active_mut().map(next_transaction).unwrap_or((0, history_timestamp())),
+            };
+            self.journal.push(JournalEntry { command: id.to_string(), params: params.clone(), transaction_id, timestamp });
             if self.journal.len() > 10_000 {
                 self.journal.drain(..1000);
             }
@@ -568,7 +599,7 @@ impl Session {
         let Some(st) = self.active_mut() else { return };
         let Some(c) = st.composition.take() else { return };
         if !Arc::ptr_eq(&c.before, &st.doc) {
-            push_undo(st, HistoryEntry { label: "Type Text".into(), doc: c.before, selection: c.before_selection });
+            push_undo(st, "Type Text".into(), c.before, c.before_selection);
         }
     }
 
@@ -614,12 +645,19 @@ fn clamp_selection(st: &mut DocState) {
     }
 }
 
-pub(crate) fn push_undo(st: &mut DocState, e: HistoryEntry) {
-    st.history.undo.push(e);
+fn next_transaction(st: &mut DocState) -> (u64, u64) {
+    st.next_transaction_id = st.next_transaction_id.saturating_add(1);
+    (st.next_transaction_id, (st.history_clock)())
+}
+
+pub(crate) fn push_undo(st: &mut DocState, label: String, doc: Arc<Presentation>, selection: Selection) -> (u64, u64) {
+    let (transaction_id, timestamp) = next_transaction(st);
+    st.history.undo.push(HistoryEntry { transaction_id, timestamp, label, doc, selection });
     st.history.redo.clear();
     if st.history.undo.len() > st.history.limit.max(1) {
         st.history.undo.remove(0);
     }
+    (transaction_id, timestamp)
 }
 
 #[cfg(test)]

@@ -92,7 +92,7 @@ fn closing_another_presentation_keeps_the_active_one() {
     s.execute("file.close", &json!({})).unwrap();
     assert_eq!(titles(&s), ["Presentation2"], "no index closes the active one");
     assert_eq!(s.active_index(), Some(0));
-    let journal: Vec<&str> = s.journal.iter().map(|(id, _)| id.as_str()).collect();
+    let journal: Vec<&str> = s.journal.iter().map(|e| e.command.as_str()).collect();
     assert!(journal.contains(&"window.next") && journal.contains(&"file.close"), "{journal:?}");
 }
 

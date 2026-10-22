@@ -11,6 +11,7 @@ use crate::theme::{self, Tokens};
 use crate::widgets::{self, RIBBON_H, big_button, big_button_ex, color_split, dropdown, group, icon_toggle, rows, small_button, small_button_ex};
 
 pub const TITLE_H: f32 = 38.0;
+pub const NARROW_TITLE_H: f32 = TITLE_H + 44.0;
 
 /// Is engine command `id` enabled right now?
 pub fn enabled(app: &SlideApp, id: &str) -> bool {
@@ -27,7 +28,8 @@ fn run(app: &mut SlideApp, id: &str, p: Value) {
 /// The window's title row: traffic-light space, quick access, centred title, actions.
 pub fn title_bar(app: &mut SlideApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
-    egui::Panel::top("title_bar").exact_size(TITLE_H).frame(egui::Frame::NONE.fill(t.chrome)).show(ui, |ui| {
+    let height = if app.layout.is_narrow() { NARROW_TITLE_H } else { TITLE_H };
+    egui::Panel::top("title_bar").exact_size(height).frame(egui::Frame::NONE.fill(t.chrome)).show(ui, |ui| {
         let rect = ui.max_rect();
         // Dragging the empty title bar moves the window.
         let drag = ui.interact(rect, ui.id().with("titledrag"), Sense::click_and_drag());
@@ -74,22 +76,22 @@ pub fn title_bar(app: &mut SlideApp, ui: &mut Ui) {
 const TITLE_ICON: f32 = 24.0;
 const LEFT_GAP: f32 = 2.0;
 const RIGHT_GAP: f32 = 6.0;
-/// Room the document title keeps before optional controls give way, and its margins.
-const TITLE_MIN: f32 = 90.0;
+/// Horizontal margins around the document title.
 const TITLE_MARGIN: f32 = 8.0;
 
-/// A phone-width title bar: the optional controls give way (`narrow::TITLE_DROP_ORDER`) until the
-/// rest fits, and the title, cut with "…", takes the room between the two groups or is left out.
+/// A phone-width title bar keeps the title above the controls so touch targets fit.
 fn narrow_title_bar(app: &mut SlideApp, ui: &mut Ui, rect: Rect) {
     use crate::narrow::{TitleFit, TitleItem};
     let t = Tokens::get(ui.ctx());
-    let left = rect.min.x + if app.integrated_titlebar { 84.0 } else { 10.0 };
+    let title_rect = Rect::from_min_max(rect.min, pos2(rect.max.x, rect.min.y + TITLE_H));
+    let rect = Rect::from_min_max(pos2(rect.min.x, title_rect.max.y), rect.max);
+    let left = rect.min.x + 10.0;
     let right = rect.max.x - 10.0;
     let present = present_width(ui);
-    let fixed = 2.0 * (TITLE_ICON + LEFT_GAP) + 2.0 * (TITLE_ICON + RIGHT_GAP) + present + TITLE_MIN + 2.0 * TITLE_MARGIN;
+    let fixed = TITLE_ICON + LEFT_GAP + 2.0 * (44.0 + LEFT_GAP) + 2.0 * (TITLE_ICON + RIGHT_GAP) + present + RIGHT_GAP;
     let fit = TitleFit::new(right - left, fixed, |item| match item {
         TitleItem::Appearance | TitleItem::Comments => TITLE_ICON + RIGHT_GAP,
-        TitleItem::PlayFromStart | TitleItem::Home | TitleItem::Redo => TITLE_ICON + LEFT_GAP,
+        TitleItem::PlayFromStart | TitleItem::Home => TITLE_ICON + LEFT_GAP,
     });
     let row = |x0: f32, x1: f32, layout: egui::Layout| {
         egui::UiBuilder::new().max_rect(Rect::from_min_max(pos2(x0, rect.min.y), pos2(x1.max(x0), rect.max.y))).layout(layout)
@@ -101,9 +103,7 @@ fn narrow_title_bar(app: &mut SlideApp, ui: &mut Ui, rect: Rect) {
     }
     save_button(app, &mut lui);
     undo_button(app, &mut lui);
-    if fit.shows(TitleItem::Redo) {
-        redo_button(app, &mut lui);
-    }
+    redo_button(app, &mut lui);
     if fit.shows(TitleItem::PlayFromStart) {
         play_from_start_button(app, &mut lui);
     }
@@ -121,7 +121,10 @@ fn narrow_title_bar(app: &mut SlideApp, ui: &mut Ui, rect: Rect) {
     if fit.shows(TitleItem::Appearance) {
         appearance_button(app, &mut rui);
     }
-    let gap = Rect::from_min_max(pos2(left_end + TITLE_MARGIN, rect.min.y), pos2(rui.min_rect().min.x - TITLE_MARGIN, rect.max.y));
+    let gap = Rect::from_min_max(
+        pos2(title_rect.min.x + if app.integrated_titlebar { 84.0 } else { TITLE_MARGIN }, title_rect.min.y),
+        title_rect.max - vec2(TITLE_MARGIN, 0.0),
+    );
     let title = document_title(app);
     let font = theme::font(13.0);
     // "Saving…" and "Save failed" stay readable: the name is shortened first.
@@ -197,14 +200,20 @@ fn save_button(app: &mut SlideApp, ui: &mut Ui) {
     }
 }
 
+fn history_button(app: &SlideApp, ui: &mut Ui, icon: Icon, tip: &str, command: &str) -> egui::Response {
+    let size = if app.layout.is_narrow() { vec2(44.0, 44.0) } else { vec2(24.0, 22.0) };
+    named(widgets::icon_toggle_sized(ui, icon, tip, enabled(app, command), false, size), tip)
+}
+
 fn undo_button(app: &mut SlideApp, ui: &mut Ui) {
-    if named(icon_toggle(ui, Icon::Undo, "Undo (⌘Z)", enabled(app, "edit.undo"), false), "Undo (⌘Z)").clicked() {
+    if history_button(app, ui, Icon::Undo, "Undo (⌘Z)", "edit.undo").clicked() {
         run(app, "edit.undo", json!({}));
     }
 }
 
 fn redo_button(app: &mut SlideApp, ui: &mut Ui) {
-    if named(icon_toggle(ui, Icon::Redo, "Redo (⌘Y)", enabled(app, "edit.redo"), false), "Redo (⌘Y)").clicked() {
+    let tip = if app.session.mac_keys { "Redo (⌘⇧Z)" } else { "Redo (Ctrl+Y)" };
+    if history_button(app, ui, Icon::Redo, tip, "edit.redo").clicked() {
         run(app, "edit.redo", json!({}));
     }
 }

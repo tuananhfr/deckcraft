@@ -208,3 +208,29 @@ fn restored_draft_keeps_its_key() {
     assert_eq!(store.removes, vec!["k-1".to_string()]);
     assert!(d.restore(&mut app, "k-2", "Junk.pptx", b"not a deck", 0.0).is_err());
 }
+
+#[test]
+fn draft_and_explicit_save_preserve_undo_history() {
+    let mut app = app();
+    let before = app.session.doc().unwrap().doc.clone();
+    edit(&mut app);
+    let mut drafts = Drafts::default();
+    let mut store = Store::default();
+    drafts.tick(&app, 0.0, CLOCK, &mut store);
+    drafts.tick(&app, IDLE_MS, CLOCK, &mut store);
+    assert_eq!(store.puts.len(), 1);
+    let recovery = std::env::temp_dir().join(format!("deckcraft-t03-recovery-{}", uid(&app)));
+    app.session.recovery_dir = Some(recovery.clone());
+    assert_eq!(app.session.execute("file.recovery.save", &json!({})).unwrap()["written"], 1);
+    app.session.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(*app.session.doc().unwrap().doc, *before);
+    app.session.execute("edit.redo", &json!({})).unwrap();
+    let path = std::env::temp_dir().join(format!("deckcraft-t03-{}.deckcraft", uid(&app)));
+    app.session.execute("file.save", &json!({"path": path.to_string_lossy()})).unwrap();
+    assert!(!app.session.doc().unwrap().is_dirty());
+    app.session.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(*app.session.doc().unwrap().doc, *before);
+    assert!(app.session.doc().unwrap().is_dirty());
+    std::fs::remove_file(path).unwrap();
+    std::fs::remove_dir_all(recovery).unwrap();
+}

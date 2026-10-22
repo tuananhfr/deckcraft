@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::cmd::{self, xfrm_of};
-use crate::{HistoryEntry, Result, Session, TextSel};
+use crate::{Result, Session, TextSel};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -322,7 +322,7 @@ impl Session {
             && let Some(i) = st.interaction.take()
             && !Arc::ptr_eq(&i.doc, &st.doc)
         {
-            crate::push_undo(st, HistoryEntry { label: i.label, doc: i.doc, selection: i.selection });
+            crate::push_undo(st, i.label, i.doc, i.selection);
         }
     }
 
@@ -1087,7 +1087,7 @@ impl Session {
             Ok(())
         })?;
         if let Some(st) = self.active_mut() {
-            crate::push_undo(st, HistoryEntry { label: "Erase".into(), doc: before, selection: sel_before });
+            crate::push_undo(st, "Erase".into(), before, sel_before);
         }
         Ok(Value::Null)
     }

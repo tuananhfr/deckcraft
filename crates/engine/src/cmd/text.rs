@@ -572,7 +572,9 @@ fn delete_surrounding(s: &mut Session, p: &Value) -> Result<Value> {
             st.composition =
                 Some(crate::Composition { start, len: 0, active: None, props, before: doc_before, before_selection: selection_before, deleted: true })
         }
-        None => crate::push_undo(st, crate::HistoryEntry { label: "Delete Text".into(), doc: doc_before, selection: selection_before }),
+        None => {
+            crate::push_undo(st, "Delete Text".into(), doc_before, selection_before);
+        }
     }
     Ok(json!({"deleted": before_n + after_n}))
 }

@@ -5,7 +5,7 @@
 use deckcraft_engine::Session;
 use egui::{Rect, vec2};
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable};
 use serde_json::json;
 
 use crate::i18n::{self, Lang};
@@ -135,13 +135,20 @@ fn phone_title_and_status_bars_never_overlap() {
         }
         h.run_steps(2);
         let title = format!("Northern Lights — {}", i18n::tr(lang, "Edited"));
-        let top = Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(width, crate::ribbon::TITLE_H));
+        let top = Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(width, crate::ribbon::NARROW_TITLE_H));
         let mut bar = rects_in(
             &h,
             lang,
             top,
             &[
-                "Home", "Save (⌘S)", "Undo (⌘Z)", "Redo (⌘Y)", "Play from Start (F5)", "Search commands (⇧⌘P)", "Comments", "Light/Dark appearance",
+                "Home",
+                "Save (⌘S)",
+                "Undo (⌘Z)",
+                "Redo (Ctrl+Y)",
+                "Play from Start (F5)",
+                "Search commands (⇧⌘P)",
+                "Comments",
+                "Light/Dark appearance",
                 "Close document",
             ],
         );
@@ -162,5 +169,106 @@ fn phone_title_and_status_bars_never_overlap() {
         let zoom = h.query_all_by_label_contains("%").map(|n| n.rect()).find(|r| bottom.intersects(*r));
         status.push(("zoom".into(), zoom.expect("the zoom percentage stays")));
         assert_apart("status bar", width, &status);
+    }
+}
+
+#[test]
+fn undo_redo_touch_targets() {
+    for width in [320.0, 375.0, 390.0] {
+        let mut h = sample_harness(vec2(width, HEIGHT), "en");
+        h.state_mut().run("slide.new", json!({})).unwrap();
+        h.state_mut().run("edit.undo", json!({})).unwrap();
+        h.run_steps(3);
+        let undo = h.get_by_label("Undo (⌘Z)").rect();
+        let redo = h.get_by_label("Redo (Ctrl+Y)").rect();
+        assert!(undo.width() >= 44.0 && undo.height() >= 44.0, "Undo target: {undo:?}");
+        assert!(redo.width() >= 44.0 && redo.height() >= 44.0, "Redo target: {redo:?}");
+        assert!(!undo.intersects(redo));
+        assert!(redo.right() <= width);
+        let bar = Rect::from_min_size(egui::Pos2::ZERO, vec2(width, crate::ribbon::NARROW_TITLE_H));
+        let mut rects = rects_in(
+            &h,
+            Lang::EN,
+            bar,
+            &["Home", "Save (⌘S)", "Undo (⌘Z)", "Redo (Ctrl+Y)", "Play from Start (F5)", "Search commands (⇧⌘P)", "Close document"],
+        );
+        rects.extend(h.query_all_by_label_contains("Present").filter(|n| bar.contains_rect(n.rect())).map(|n| ("Present".into(), n.rect())));
+        assert_apart("Undo/Redo neighbours", width, &rects);
+    }
+}
+
+#[test]
+fn undo_redo_key_events_in_canvas_thumbnails_and_sorter() {
+    for mode in ["canvas", "thumbnails", "sorter"] {
+        for modifier in [egui::Modifiers::CTRL, egui::Modifiers::MAC_CMD | egui::Modifiers::COMMAND] {
+            let mut h = sample_harness(vec2(1024.0, HEIGHT), "en");
+            h.state_mut().session.mac_keys = modifier.mac_cmd;
+            h.ctx.set_os(if modifier.mac_cmd { egui::os::OperatingSystem::Mac } else { egui::os::OperatingSystem::Windows });
+            if mode == "sorter" {
+                h.state_mut().run("view.sorter", json!({})).unwrap();
+            }
+            h.run_steps(2);
+            let before = h.state().session.doc().unwrap().doc.clone();
+            if mode == "canvas" {
+                h.state_mut().run("insert.textBox", json!({"text": "Undo me"})).unwrap();
+            } else {
+                h.state_mut().run("slide.new", json!({})).unwrap();
+            }
+            let after = h.state().session.doc().unwrap().doc.clone();
+            for (key, shift) in [(egui::Key::Y, false), (egui::Key::Z, true)] {
+                h.key_press_modifiers(modifier, egui::Key::Z);
+                h.run_steps(2);
+                assert!(*h.state().session.doc().unwrap().doc == *before, "{mode} Undo {modifier:?}");
+                h.key_press_modifiers(if shift { modifier | egui::Modifiers::SHIFT } else { modifier }, key);
+                h.run_steps(2);
+                assert!(*h.state().session.doc().unwrap().doc == *after, "{mode} Redo {modifier:?}");
+            }
+        }
+    }
+}
+
+#[test]
+#[ignore]
+fn undo_redo_screenshots() {
+    let Some(dir) = std::env::var_os("DECKCRAFT_SHOTS").map(std::path::PathBuf::from) else { return };
+    std::fs::create_dir_all(&dir).unwrap();
+    for width in [320.0, 375.0, 390.0] {
+        let mut h = sample_harness(vec2(width, HEIGHT), "vi");
+        h.state_mut().run("slide.new", json!({})).unwrap();
+        h.state_mut().run("edit.undo", json!({})).unwrap();
+        h.run_steps(3);
+        h.render().unwrap().save(dir.join(format!("undo-redo-{width:.0}.png"))).unwrap();
+    }
+}
+
+#[test]
+fn undo_redo_buttons_have_real_disabled_semantics() {
+    let mut h = sample_harness(vec2(390.0, HEIGHT), "en");
+    for label in ["Undo (⌘Z)", "Redo (Ctrl+Y)"] {
+        assert!(h.get_by_label(label).accesskit_node().is_disabled());
+    }
+    assert!(h.state_mut().session.execute("edit.undo", &json!({})).is_err());
+    assert!(h.state_mut().session.execute("edit.redo", &json!({})).is_err());
+    h.state_mut().run("slide.new", json!({})).unwrap();
+    h.run_steps(2);
+    assert!(!h.get_by_label("Undo (⌘Z)").accesskit_node().is_disabled());
+    assert!(h.get_by_label("Redo (Ctrl+Y)").accesskit_node().is_disabled());
+    h.get_by_label("Undo (⌘Z)").click();
+    h.run_steps(2);
+    assert!(h.get_by_label("Undo (⌘Z)").accesskit_node().is_disabled());
+    assert!(!h.get_by_label("Redo (Ctrl+Y)").accesskit_node().is_disabled());
+    h.get_by_label("Redo (Ctrl+Y)").click();
+    h.run_steps(2);
+    assert!(!h.get_by_label("Undo (⌘Z)").accesskit_node().is_disabled());
+    assert!(h.get_by_label("Redo (Ctrl+Y)").accesskit_node().is_disabled());
+}
+
+#[test]
+fn redo_tooltip_follows_platform() {
+    let mut h = sample_harness(vec2(390.0, HEIGHT), "vi");
+    for (mac, label) in [(true, "Làm lại (⌘⇧Z)"), (false, "Làm lại (Ctrl+Y)")] {
+        h.state_mut().session.mac_keys = mac;
+        h.run_steps(2);
+        assert!(h.query_by_label(label).is_some());
     }
 }

@@ -1,5 +1,7 @@
 # ERPCons changes
 
+- Undo/Redo (both): add Shift+Z Redo, platform tooltips, timestamped transaction history, reachable 44-point narrow-screen controls and save-history regression coverage.
+
 - AutoRecover (both): retain recovered records until a durable checkpoint or explicit save/discard, deduplicate related checkpoints and fall back from corrupt newer records.
 
 - Point the website links (About, installers, release notes) to https://office.erpcons.ai; app ids keep the `vn.erpcons.*` form.

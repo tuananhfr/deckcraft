@@ -82,7 +82,9 @@ fn clicking_a_tab_switches_through_window_next() {
     h.get_by_label("Presentation1").click();
     h.run_steps(3);
     assert_eq!(active_title(h.state()), "Presentation1");
-    assert_eq!(h.state().session.journal.last(), Some(&("window.next".to_string(), json!({"index": 0}))));
+    let entry = h.state().session.journal.last().unwrap();
+    assert_eq!(entry.command, "window.next");
+    assert_eq!(entry.params, json!({"index": 0}));
     h.get_by_label("Presentation2").click();
     h.run_steps(3);
     assert_eq!(active_title(h.state()), "Presentation2");

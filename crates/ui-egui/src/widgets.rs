@@ -150,14 +150,21 @@ pub fn small_button_ex(ui: &mut Ui, icon: Icon, label: &str, enabled: bool, sele
 
 /// A square icon toggle (B, I, U, alignment…).
 pub fn icon_toggle(ui: &mut Ui, icon: Icon, tip: &str, enabled: bool, on: bool) -> Response {
-    let t = Tokens::get(ui.ctx());
-    let (rect, resp) = ui.allocate_exact_size(vec2(24.0, 22.0), if enabled { Sense::click() } else { Sense::hover() });
-    let painter = ui.painter_at(rect);
-    if let Some(c) = bg(ui, &resp, on, &t) {
-        painter.rect_filled(rect, CornerRadius::same(4), c);
-    }
-    icons::paint(&painter, rect.shrink(3.0), icon, t.text, !enabled);
-    resp.on_hover_text(crate::tl!(tip))
+    icon_toggle_sized(ui, icon, tip, enabled, on, vec2(24.0, 22.0))
+}
+
+pub fn icon_toggle_sized(ui: &mut Ui, icon: Icon, tip: &str, enabled: bool, on: bool, size: Vec2) -> Response {
+    ui.add_enabled_ui(enabled, |ui| {
+        let t = Tokens::get(ui.ctx());
+        let (rect, resp) = ui.allocate_exact_size(size, Sense::click());
+        let painter = ui.painter_at(rect);
+        if let Some(c) = bg(ui, &resp, on, &t) {
+            painter.rect_filled(rect, CornerRadius::same(4), c);
+        }
+        icons::paint(&painter, Rect::from_center_size(rect.center(), vec2(18.0, 16.0)), icon, t.text, !enabled);
+        resp.on_hover_text(crate::tl!(tip))
+    })
+    .inner
 }
 
 /// Icon with a colour bar under it and a dropdown arrow (Font Color, Highlight, Shape Fill…).
@@ -498,5 +505,35 @@ mod tests {
         harness.run();
         assert_eq!(*picked.borrow(), Some(Some(ColorRef::rgb(Rgba::from_hex("00FF00").unwrap()))));
         assert!(harness.query_by_role(Role::TextInput).is_none(), "picking a colour closes the menu");
+    }
+}
+
+#[cfg(test)]
+mod history_button_tests {
+    use super::*;
+
+    #[test]
+    fn disabled_history_target_ignores_hover_and_press() {
+        let ctx = egui::Context::default();
+        let input = egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(200.0, 100.0))),
+            events: vec![
+                egui::Event::PointerMoved(pos2(20.0, 20.0)),
+                egui::Event::PointerButton {
+                    pos: pos2(20.0, 20.0),
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+            ..Default::default()
+        };
+        let _ = ctx.run_ui(input, |ui| {
+            let response = icon_toggle_sized(ui, Icon::Undo, "Undo (⌘Z)", false, false, vec2(44.0, 44.0));
+            assert!(!response.enabled());
+            assert!(!response.hovered());
+            assert!(!response.is_pointer_button_down_on());
+            assert!(!response.clicked());
+        });
     }
 }

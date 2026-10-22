@@ -41,6 +41,11 @@ fn document(s: &mut Session, _p: &Value) -> Result<Value> {
         "layouts": m.map(|m| m.layouts.iter().map(|l| json!({"id": l.id, "name": l.name})).collect::<Vec<_>>()),
         "selection": serde_json::to_value(&st.selection).unwrap_or_default(),
         "media": d.media.iter().map(|x| json!({"id": x.id, "name": x.name, "type": x.content_type, "bytes": x.data.len()})).collect::<Vec<_>>(),
+        "history": {
+            "undo": st.history.undo.iter().map(|e| json!({"label": e.label, "transaction_id": e.transaction_id, "timestamp": e.timestamp})).collect::<Vec<_>>(),
+            "redo": st.history.redo.iter().map(|e| json!({"label": e.label, "transaction_id": e.transaction_id, "timestamp": e.timestamp})).collect::<Vec<_>>(),
+        },
+        "journal": s.journal,
         "undo": st.history.undo.last().map(|e| e.label.clone()),
         "redo": st.history.redo.last().map(|e| e.label.clone()),
     }))
