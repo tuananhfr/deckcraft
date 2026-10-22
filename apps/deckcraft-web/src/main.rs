@@ -28,6 +28,8 @@ mod clipboard;
 mod closed_hook;
 #[cfg(target_arch = "wasm32")]
 mod draft_bridge;
+#[cfg(any(target_arch = "wasm32", test))]
+mod draft_state;
 #[cfg(target_arch = "wasm32")]
 mod language;
 #[cfg(any(target_arch = "wasm32", test))]
