@@ -67,7 +67,11 @@ fn recovery_opens_up_to_the_limit_and_keeps_the_rest() {
     }
     assert!(refused(b.execute("file.recovery.open", &json!({}))));
     assert_eq!(b.documents().len(), 10);
-    assert_eq!(recovery::list(&dir).len(), 1, "the one that didn't fit stays recoverable");
+    // Opened entries stay on disk until a durable checkpoint replaces them (DECK-05).
+    let open_sources: Vec<_> = b.documents().iter().filter_map(|d| d.recovery_source).collect();
+    assert_eq!(open_sources.len(), 2);
+    let left: Vec<_> = recovery::list(&dir).into_iter().filter(|(uid, _)| !open_sources.contains(uid)).collect();
+    assert_eq!(left.len(), 1, "the one that didn't fit stays recoverable");
     let _ = std::fs::remove_dir_all(&dir);
 }
 
