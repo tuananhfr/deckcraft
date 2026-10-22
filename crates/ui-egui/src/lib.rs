@@ -1291,6 +1291,10 @@ impl SlideApp {
         self.tick_media(&ctx);
         if self.show.is_some() {
             show::ui(self, ui);
+            #[cfg(target_arch = "wasm32")]
+            if self.media.output_unavailable() {
+                toast::show(self, &ctx);
+            }
             self.perf.frame_ms = now_ms() - t0;
             return;
         }
@@ -1371,6 +1375,10 @@ impl SlideApp {
             }
         }
         self.media.tick(ctx, &mut self.session);
+        #[cfg(target_arch = "wasm32")]
+        if self.media.take_output_failure() {
+            self.toast = Some(toast::Toast { text: media::audio_blocked_notice().to_string(), at: now_ms() });
+        }
     }
 
     pub fn open_url(&mut self, url: &str) {

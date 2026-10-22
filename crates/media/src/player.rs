@@ -3,7 +3,7 @@
 //! The UI host owns a [`Player`] and an optional [`AudioOut`] (cpal on desktop). Each playing
 //! media shape is a *voice* with its own clock (`position`, in media seconds), advanced by the
 //! audio callback as it pulls samples — so video frames synced to it stay in step with what is
-//! heard. Without an output device (web, CI, no sound card) [`Player::tick`] advances the clocks on
+//! heard. Without an output device (CI, no sound card) [`Player::tick`] advances the clocks on
 //! wall time instead, so playback, looping and video still work silently.
 //!
 //! Audio is decoded once per media item (on a worker thread where there are threads) and cached;
@@ -16,10 +16,18 @@ use std::sync::{Arc, Mutex, OnceLock};
 use crate::{Bytes, ClipParams, Pcm};
 
 /// An audio output device. `fill(buffer, channels, sample_rate)` is called from the device's
-/// thread to fill an interleaved f32 buffer.
+/// thread or the browser host frame to fill an interleaved f32 buffer.
 pub trait AudioOut {
     fn start(&mut self, fill: Box<dyn FnMut(&mut [f32], usize, u32) + Send>) -> Result<(), String>;
     fn stop(&mut self);
+    /// Browser outputs must pause audible voices when permission or the device is lost.
+    fn requires_output(&self) -> bool {
+        false
+    }
+    /// Service buffered outputs and report lost permission on the host frame.
+    fn check(&mut self) -> Result<(), String> {
+        Ok(())
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -193,12 +201,23 @@ pub struct Player {
     last_tick: Option<f64>,
     idle_since: Option<f64>,
     cache: HashMap<u64, Slot>,
+    output_error: Option<String>,
+    output_failures: u64,
 }
 
 impl Player {
     /// A player over `out` (`None`: silent, clocked by [`Player::tick`]).
     pub fn new(out: Option<Box<dyn AudioOut>>) -> Player {
-        Player { out, streaming: false, mixer: Arc::new(Mutex::new(Mixer::default())), last_tick: None, idle_since: None, cache: HashMap::new() }
+        Player {
+            out,
+            streaming: false,
+            mixer: Arc::new(Mutex::new(Mixer::default())),
+            last_tick: None,
+            idle_since: None,
+            cache: HashMap::new(),
+            output_error: None,
+            output_failures: 0,
+        }
     }
 
     pub fn has_output(&self) -> bool {
@@ -258,7 +277,11 @@ impl Player {
                 m.voices.push(Voice { key, audio, spec, t, state: PlayState::Playing });
             }
         });
-        self.ensure_stream();
+        if spec.audio || self.out.as_ref().is_none_or(|out| !out.requires_output()) {
+            self.output_error = None;
+            self.ensure_stream();
+            self.check_output();
+        }
     }
 
     fn ensure_stream(&mut self) {
@@ -277,10 +300,54 @@ impl Player {
         match out.start(fill) {
             Ok(()) => self.streaming = true,
             Err(e) => {
-                log::warn!("audio output unavailable ({e}); media plays silently");
-                self.out = None;
+                if out.requires_output() {
+                    self.output_error = Some(e);
+                    self.output_failures = self.output_failures.wrapping_add(1);
+                } else {
+                    log::warn!("audio output unavailable ({e}); media plays silently");
+                    self.out = None;
+                }
             }
         }
+    }
+
+    fn check_output(&mut self) {
+        if let Some(out) = self.out.as_mut()
+            && out.requires_output()
+        {
+            if self.streaming
+                && let Err(e) = out.check()
+            {
+                self.output_error = Some(e);
+                self.output_failures = self.output_failures.wrapping_add(1);
+                out.stop();
+                self.streaming = false;
+            }
+            if self.output_error.is_some() {
+                self.with(|m| {
+                    for v in &mut m.voices {
+                        if v.spec.audio && v.state == PlayState::Playing {
+                            v.state = PlayState::Paused;
+                        }
+                    }
+                });
+            }
+        }
+    }
+
+    /// Output permission failure, distinct from an unsupported audio codec.
+    pub fn output_unavailable(&self) -> bool {
+        self.output_error.is_some()
+    }
+
+    /// Why the required output is unavailable, as also reported in voices' `error`.
+    pub fn output_error(&self) -> Option<&str> {
+        self.output_error.as_deref()
+    }
+
+    /// Grows on every output failure, so a host can notify once per failure.
+    pub fn output_failures(&self) -> u64 {
+        self.output_failures
     }
 
     pub fn pause(&mut self, key: u64) {
@@ -319,7 +386,11 @@ impl Player {
                 state: if v.state == PlayState::Playing && v.loading() { PlayState::Loading } else { v.state },
                 position: v.t,
                 duration: v.duration(),
-                error: v.audio.as_ref().and_then(|s| s.get()).and_then(|r| r.as_ref().err().cloned()),
+                error: self
+                    .output_error
+                    .clone()
+                    .filter(|_| v.spec.audio)
+                    .or_else(|| v.audio.as_ref().and_then(|s| s.get()).and_then(|r| r.as_ref().err().cloned())),
             })
         })
     }
@@ -336,6 +407,7 @@ impl Player {
     /// Call every frame with the host's clock (seconds): runs the voices' clocks when there is no
     /// audio device, and releases the device after a few idle seconds.
     pub fn tick(&mut self, now: f64) {
+        self.check_output();
         let dt = self.last_tick.map(|l| (now - l).clamp(0.0, 0.25)).unwrap_or(0.0);
         self.last_tick = Some(now);
         if !self.streaming && dt > 0.0 {
@@ -398,6 +470,7 @@ impl Drop for Player {
 }
 
 #[cfg(test)]
+#[allow(clippy::expect_used)]
 mod tests {
     use super::*;
 
@@ -501,5 +574,122 @@ mod tests {
         }
         let pos = p.status(3).map(|s| s.position).unwrap_or(-1.0);
         assert!((pos - 0.1).abs() < 1e-6, "{pos}");
+    }
+
+    type Callback = Arc<Mutex<Option<Box<dyn FnMut(&mut [f32], usize, u32) + Send>>>>;
+
+    struct BrowserFake {
+        callback: Callback,
+        allowed: Arc<std::sync::atomic::AtomicBool>,
+    }
+
+    impl AudioOut for BrowserFake {
+        fn start(&mut self, fill: Box<dyn FnMut(&mut [f32], usize, u32) + Send>) -> Result<(), String> {
+            self.check()?;
+            *self.callback.lock().map_err(|e| e.to_string())? = Some(fill);
+            Ok(())
+        }
+        fn stop(&mut self) {}
+        fn requires_output(&self) -> bool {
+            true
+        }
+        fn check(&mut self) -> Result<(), String> {
+            if self.allowed.load(std::sync::atomic::Ordering::Relaxed) { Ok(()) } else { Err("blocked".into()) }
+        }
+    }
+
+    fn generated_wav() -> Bytes {
+        let mut wav = Vec::new();
+        wav.extend_from_slice(b"RIFF");
+        wav.extend_from_slice(&(36u32 + 16000).to_le_bytes());
+        wav.extend_from_slice(b"WAVEfmt ");
+        wav.extend_from_slice(&16u32.to_le_bytes());
+        wav.extend_from_slice(&1u16.to_le_bytes());
+        wav.extend_from_slice(&1u16.to_le_bytes());
+        wav.extend_from_slice(&8000u32.to_le_bytes());
+        wav.extend_from_slice(&16000u32.to_le_bytes());
+        wav.extend_from_slice(&2u16.to_le_bytes());
+        wav.extend_from_slice(&16u16.to_le_bytes());
+        wav.extend_from_slice(b"data");
+        wav.extend_from_slice(&16000u32.to_le_bytes());
+        for i in 0..8000 {
+            let sample = if i % 20 < 10 { 12000i16 } else { -12000i16 };
+            wav.extend_from_slice(&sample.to_le_bytes());
+        }
+        Arc::new(wav)
+    }
+
+    #[test]
+    fn generated_wav_reaches_output_resampled_with_gain() {
+        let callback = Arc::new(Mutex::new(None));
+        let allowed = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let mut player = Player::new(Some(Box::new(BrowserFake { callback: callback.clone(), allowed })));
+        let mut voice = spec(1.0, false);
+        voice.audio = true;
+        voice.clip.volume = 0.5;
+        player.play(1, 1, &generated_wav(), voice, None);
+        assert!(player.wait_loaded(1, std::time::Duration::from_secs(5)));
+        let mut samples = vec![0.0; 4800 * 2];
+        let mut guard = callback.lock().unwrap_or_else(|e| e.into_inner());
+        let fill = guard.as_mut().expect("output callback installed");
+        fill(&mut samples, 2, 48000);
+        assert!(samples.iter().any(|s| s.abs() > 0.1));
+        assert!(samples.iter().all(|s| s.abs() < 0.2));
+        assert!(samples.as_chunks::<2>().0.iter().all(|pair| pair[0] == pair[1]));
+        assert!((player.status(1).expect("voice").position - 0.1).abs() < 1e-6);
+    }
+
+    #[test]
+    fn unavailable_output_pauses_and_retries_without_losing_position() {
+        let callback = Arc::new(Mutex::new(None));
+        let allowed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let mut player = Player::new(Some(Box::new(BrowserFake { callback, allowed: allowed.clone() })));
+        let mut voice = spec(1.0, false);
+        voice.audio = true;
+        let wav = generated_wav();
+        player.play(1, 1, &wav, voice, Some(0.25));
+        player.tick(0.0);
+        player.tick(0.2);
+        let status = player.status(1).expect("voice");
+        assert_eq!(status.state, PlayState::Paused);
+        assert_eq!(status.position, 0.25);
+        assert!(status.error.is_some());
+        assert_eq!(player.output_failures(), 1);
+        allowed.store(true, std::sync::atomic::Ordering::Relaxed);
+        player.play(1, 1, &wav, voice, None);
+        assert!(player.wait_loaded(1, std::time::Duration::from_secs(5)));
+        assert_eq!(player.status(1).expect("voice").state, PlayState::Playing);
+        assert!(!player.output_unavailable());
+        allowed.store(false, std::sync::atomic::Ordering::Relaxed);
+        player.tick(0.4);
+        assert_eq!(player.status(1).expect("voice").state, PlayState::Paused);
+        assert!(player.output_unavailable());
+        assert_eq!(player.output_failures(), 2);
+    }
+
+    struct MissingDevice;
+
+    impl AudioOut for MissingDevice {
+        fn start(&mut self, _: Box<dyn FnMut(&mut [f32], usize, u32) + Send>) -> Result<(), String> {
+            Err("no device".into())
+        }
+        fn stop(&mut self) {}
+    }
+
+    #[test]
+    fn optional_output_failure_still_plays_on_wall_clock() {
+        let mut player = Player::new(Some(Box::new(MissingDevice)));
+        let mut voice = spec(1.0, false);
+        voice.audio = true;
+        player.play(1, 1, &generated_wav(), voice, Some(0.0));
+        assert!(player.wait_loaded(1, std::time::Duration::from_secs(5)));
+        player.tick(0.0);
+        player.tick(0.2);
+        let status = player.status(1).expect("voice");
+        assert_eq!(status.state, PlayState::Playing);
+        assert!((status.position - 0.2).abs() < 1e-3, "{}", status.position);
+        assert!(!player.has_output());
+        assert!(!player.output_unavailable());
+        assert_eq!(player.output_failures(), 0);
     }
 }

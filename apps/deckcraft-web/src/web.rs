@@ -172,6 +172,7 @@ fn services(inbox: Inbox, ctx: egui::Context, clipboard: Option<ClipboardBridge>
     let open_inbox = inbox.clone();
     let save_ctx = ctx.clone();
     let mut services = Services {
+        audio_out: Some(Box::new(crate::audio::WebAudio::new())),
         open_async: Some(Box::new(move |purpose: &str| {
             let inbox = open_inbox.clone();
             let ctx = ctx.clone();

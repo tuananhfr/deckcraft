@@ -33,6 +33,13 @@ pub struct MediaHost {
     durations: HashMap<usize, f64>,
     /// Animated GIF clocks: when each started and, while paused, the time it holds.
     gifs: HashMap<ShapeId, (f64, Option<f64>)>,
+    /// The player's output failure count already notified.
+    noted_failures: u64,
+}
+
+/// The notice for a browser that hasn't allowed audio output.
+pub fn audio_blocked_notice() -> &'static str {
+    crate::tl!("Cannot play audio: the browser has not allowed it. Press Play again.")
 }
 
 /// An animated GIF picture on a slide: its box, play time, frame and seconds to the next frame.
@@ -57,7 +64,14 @@ fn key(id: ShapeId) -> u64 {
 
 impl MediaHost {
     pub fn new(out: Option<Box<dyn AudioOut>>) -> MediaHost {
-        MediaHost { player: Player::new(out), owners: HashMap::new(), videos: HashMap::new(), durations: HashMap::new(), gifs: HashMap::new() }
+        MediaHost {
+            player: Player::new(out),
+            owners: HashMap::new(),
+            videos: HashMap::new(),
+            durations: HashMap::new(),
+            gifs: HashMap::new(),
+            noted_failures: 0,
+        }
     }
 
     /// The animated GIF pictures directly on slide `index` at `now`: each plays from when it was
@@ -89,10 +103,28 @@ impl MediaHost {
         self.owners.clear();
         self.videos.clear();
         self.player = Player::new(out);
+        self.noted_failures = 0;
+    }
+
+    /// A required (browser) output can't play: audible voices are paused until Play is pressed again.
+    pub fn output_unavailable(&self) -> bool {
+        self.player.output_unavailable()
+    }
+
+    /// Whether the output failed again since the last call, so the notice shows once per failure.
+    pub fn take_output_failure(&mut self) -> bool {
+        let failures = self.player.output_failures();
+        let new = failures != self.noted_failures;
+        self.noted_failures = failures;
+        new
     }
 
     pub fn status(&self, id: ShapeId) -> Option<VoiceStatus> {
-        self.player.status(key(id))
+        let mut status = self.player.status(key(id))?;
+        if status.error.is_some() && status.error.as_deref() == self.player.output_error() {
+            status.error = Some(audio_blocked_notice().to_string());
+        }
+        Some(status)
     }
 
     /// Playing or loading (not paused / ended).
@@ -123,11 +155,15 @@ impl MediaHost {
         } else {
             *self.durations.entry(media_key).or_insert_with(|| deckcraft_media::probe(&bytes).map(|i| i.duration()).unwrap_or(0.0))
         };
+        #[cfg(target_arch = "wasm32")]
+        let has_audio = !clip.video || deckcraft_media::probe(&bytes).is_ok_and(|info| info.audio.is_some());
+        #[cfg(not(target_arch = "wasm32"))]
+        let has_audio = true;
         let spec = VoiceSpec {
             clip: ClipParams::from_ms(clip.trim_start_ms, clip.trim_end_ms, clip.fade_in_ms, clip.fade_out_ms, clip.volume),
             looping: clip.loop_play,
             duration,
-            audio: clip.volume > 0.0,
+            audio: clip.volume > 0.0 && has_audio,
         };
         if clip.video && !self.videos.contains_key(&id) {
             let feed = match VideoFeed::new(bytes.clone()) {
@@ -411,13 +447,92 @@ pub fn control_bar(ui: &mut Ui, rect: Rect, status: Option<&VoiceStatus>, clip: 
         }
     }
     if let Some(err) = status.and_then(|s| s.error.as_ref()) {
+        let text =
+            if err == audio_blocked_notice() { err.clone() } else { crate::i18n::fmt(crate::tl!("No sound: {error}"), &[("error", err.as_str())]) };
         painter.text(
             pos2(rect.min.x, rect.max.y + 3.0),
             Align2::LEFT_TOP,
-            crate::i18n::fmt(crate::tl!("No sound: {error}"), &[("error", err.as_str())]),
+            text,
             egui::FontId::proportional(10.0),
             Color32::from_rgb(0xC0, 0x40, 0x40),
         );
     }
     action
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+    use super::*;
+
+    /// A browser output that never gets permission to play.
+    struct BlockedBrowser;
+
+    impl AudioOut for BlockedBrowser {
+        fn start(&mut self, _: Box<dyn FnMut(&mut [f32], usize, u32) + Send>) -> Result<(), String> {
+            Err("browser audio suspended".into())
+        }
+        fn stop(&mut self) {}
+        fn requires_output(&self) -> bool {
+            true
+        }
+    }
+
+    /// Half a second of an 8 kHz mono 16-bit square wave.
+    fn wav() -> Vec<u8> {
+        let samples: Vec<i16> = (0..4000).map(|i| if i % 20 < 10 { 12000 } else { -12000 }).collect();
+        let data_len = (samples.len() * 2) as u32;
+        let mut wav = Vec::new();
+        wav.extend_from_slice(b"RIFF");
+        wav.extend_from_slice(&(36 + data_len).to_le_bytes());
+        wav.extend_from_slice(b"WAVEfmt ");
+        wav.extend_from_slice(&16u32.to_le_bytes());
+        wav.extend_from_slice(&1u16.to_le_bytes());
+        wav.extend_from_slice(&1u16.to_le_bytes());
+        wav.extend_from_slice(&8000u32.to_le_bytes());
+        wav.extend_from_slice(&16000u32.to_le_bytes());
+        wav.extend_from_slice(&2u16.to_le_bytes());
+        wav.extend_from_slice(&16u16.to_le_bytes());
+        wav.extend_from_slice(b"data");
+        wav.extend_from_slice(&data_len.to_le_bytes());
+        for s in samples {
+            wav.extend_from_slice(&s.to_le_bytes());
+        }
+        wav
+    }
+
+    #[test]
+    fn blocked_browser_audio_pauses_with_one_translated_notice_per_failure() {
+        crate::i18n::set_current(crate::i18n::Lang::from_code("vi").unwrap());
+        let mut doc = Presentation::default();
+        let media = doc.add_media("tone.wav", "audio/wav", wav());
+        let clip = MediaClip { media, volume: 1.0, ..Default::default() };
+        let id = ShapeId(7);
+        let mut host = MediaHost::new(Some(Box::new(BlockedBrowser)));
+        host.play(&doc, id, &clip, None, Owner::Editor);
+        let status = host.status(id).unwrap();
+        assert_eq!(status.state, PlayState::Paused);
+        assert_eq!(status.error.as_deref(), Some("Không phát được âm thanh: trình duyệt chưa cho phép. Bấm Phát lần nữa."));
+        assert!(!host.is_playing(id));
+        assert!(host.output_unavailable());
+        assert!(host.take_output_failure());
+        assert!(!host.take_output_failure(), "the notice is not repeated every frame");
+        host.toggle(&doc, id, &clip, Owner::Editor);
+        assert_eq!(host.status(id).unwrap().state, PlayState::Paused);
+        assert!(host.take_output_failure(), "pressing Play again and failing again notifies again");
+    }
+
+    #[test]
+    fn a_muted_clip_does_not_need_browser_audio() {
+        let mut doc = Presentation::default();
+        let media = doc.add_media("tone.wav", "audio/wav", wav());
+        let clip = MediaClip { media, volume: 0.0, ..Default::default() };
+        let id = ShapeId(8);
+        let mut host = MediaHost::new(Some(Box::new(BlockedBrowser)));
+        host.play(&doc, id, &clip, None, Owner::Editor);
+        assert!(host.is_playing(id));
+        assert!(!host.output_unavailable());
+        assert!(!host.take_output_failure());
+        assert_eq!(host.status(id).unwrap().error, None);
+    }
 }

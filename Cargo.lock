@@ -1264,6 +1264,7 @@ name = "deckcraft-web"
 version = "0.6.5"
 dependencies = [
  "deckcraft-engine",
+ "deckcraft-media",
  "deckcraft-ui-egui",
  "eframe",
  "egui",
