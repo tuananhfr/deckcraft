@@ -183,7 +183,11 @@ mod native {
                         match result {
                             Ok(()) => {
                                 self.updates.ready = true;
-                                self.updates.ready_at = Some(std::time::Instant::now() + std::time::Duration::from_millis(800));
+                                self.updates.ready_at = if self.updates.offer.as_ref().is_some_and(|offer| offer.windows_msi) {
+                                    None
+                                } else {
+                                    Some(std::time::Instant::now() + std::time::Duration::from_millis(800))
+                                };
                                 self.updates.message = Some(if self.updates.offer.as_ref().is_some_and(|offer| offer.windows_msi) {
                                     crate::tl!("The app will close, Windows will ask for installation permission — choose Yes — then the app will reopen automatically")
                                 } else {
@@ -201,6 +205,9 @@ mod native {
         }
 
         pub(crate) fn request_update(&mut self, ctx: &egui::Context) {
+            if self.quit_confirmed || self.close_batch.is_some() {
+                return;
+            }
             let unsaved = self
                 .session
                 .documents()
@@ -220,6 +227,7 @@ mod native {
             self.updates.approved = self.session.documents().iter().map(|doc| (doc.uid, doc.doc.clone())).collect();
             if self.updates.ready {
                 self.updates.ready = false;
+                self.updates.ready_at = None;
                 match hook.install_and_restart() {
                     Ok(()) => {
                         self.updates.open = false;
@@ -308,6 +316,7 @@ mod native {
         if !app.updates.open && app.updates.previous.is_none() {
             return;
         }
+        let mut cancel_ready = false;
         let mut later = false;
         let mut skip = false;
         let mut update = false;
@@ -365,7 +374,16 @@ mod native {
                                 retry = ui.button(crate::tl!("Retry")).clicked();
                                 later = ui.button(crate::tl!("Close")).clicked();
                             } else if app.updates.ready {
-                                if app.updates.ready_at.is_none() {
+                                if app.close_batch.is_none() && app.updates.offer.as_ref().is_some_and(|offer| offer.windows_msi) {
+                                    update = ui
+                                        .add(
+                                            egui::Button::new(egui::RichText::new(crate::tl!("Install now")).color(t.accent_text))
+                                                .fill(t.accent)
+                                                .corner_radius(16),
+                                        )
+                                        .clicked();
+                                    cancel_ready = ui.button(crate::tl!("Cancel")).clicked();
+                                } else if app.close_batch.is_none() && app.updates.ready_at.is_none() {
                                     update = ui.button(crate::tl!("Retry")).clicked();
                                 }
                             } else if let Some(offer) = &app.updates.offer {
@@ -374,7 +392,13 @@ mod native {
                                         notes = Some(offer.notes_url.clone());
                                     }
                                 } else {
-                                    update = ui.button(crate::tl!("Update now")).clicked();
+                                    update = ui
+                                        .add(
+                                            egui::Button::new(egui::RichText::new(crate::tl!("Update now")).color(t.accent_text))
+                                                .fill(t.accent)
+                                                .corner_radius(16),
+                                        )
+                                        .clicked();
                                 }
                                 later = ui.button(crate::tl!("Remind me later")).clicked();
                                 skip = ui.button(crate::tl!("Skip this version")).clicked();
@@ -396,6 +420,14 @@ mod native {
         }
         if let Some(url) = notes {
             app.open_url(&url);
+        }
+        if cancel_ready {
+            app.updates.ready = false;
+            app.updates.ready_at = None;
+            app.updates.message = None;
+            app.updates.offer = None;
+            app.updates.approved.clear();
+            app.updates.open = false;
         }
         if later {
             app.updates.open = false;

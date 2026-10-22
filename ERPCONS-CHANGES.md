@@ -1,6 +1,6 @@
 # ERPCons changes
 
-- Desktop updates: check signed ERPCons releases automatically or from Help, preserve unsaved presentations, and download, verify and restart with installation notices and a settings preference.
+- Desktop updates: check signed ERPCons releases automatically or from Help, preserve unsaved presentations, and download, verify and restart with installation notices and a settings preference; Windows MSI installation waits for Install now or Cancel.
 
 - Finder open (macOS desktop): handle document and quit Apple events through the existing open and close paths; register .deckcraft, .pptx, .potx and .ppsx with document icons.
 

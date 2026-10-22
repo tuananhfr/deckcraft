@@ -23,6 +23,7 @@ struct Fake {
     skipped: Mutex<Option<String>>,
     downloads: AtomicUsize,
     installed: AtomicBool,
+    installs: AtomicUsize,
     fail_download: AtomicBool,
     wait_download: AtomicBool,
     check_error: AtomicBool,
@@ -41,6 +42,7 @@ impl Default for Fake {
             skipped: Mutex::new(None),
             downloads: AtomicUsize::new(0),
             installed: AtomicBool::new(false),
+            installs: AtomicUsize::new(0),
             fail_download: AtomicBool::new(false),
             wait_download: AtomicBool::new(false),
             check_error: AtomicBool::new(false),
@@ -79,6 +81,7 @@ impl UpdateHook for Fake {
         if cancel.load(Ordering::Relaxed) { Err("cancelled".into()) } else { Ok(()) }
     }
     fn install_and_restart(&self) -> Result<(), String> {
+        self.installs.fetch_add(1, Ordering::SeqCst);
         self.installed.store(true, Ordering::SeqCst);
         Ok(())
     }
@@ -409,4 +412,88 @@ fn saving_before_update_keeps_the_presentation_open_during_download() {
     h.get_by_label("Cancel").click();
     wait_for(&mut h, "Update now");
     std::fs::remove_dir_all(dir).unwrap();
+}
+
+#[test]
+fn msi_waits_for_install_click_and_installs_once() {
+    let fake = Arc::new(Fake { msi: true, ..Fake::default() });
+    let mut h = harness(fake.clone());
+    wait_for(&mut h, "Update now");
+    h.get_by_label("Update now").click();
+    wait_for(&mut h, "Install now");
+    std::thread::sleep(std::time::Duration::from_millis(850));
+    h.run_steps(5);
+    assert_eq!(fake.installs.load(Ordering::SeqCst), 0);
+    h.get_by_label("Install now").click();
+    h.run_steps(3);
+    h.state_mut().request_update(&egui::Context::default());
+    h.run_steps(3);
+    assert_eq!(fake.installs.load(Ordering::SeqCst), 1);
+    assert!(h.state().quit_confirmed);
+}
+
+#[test]
+fn msi_cancel_allows_forced_check_and_download_again() {
+    let fake = Arc::new(Fake { msi: true, ..Fake::default() });
+    let mut h = harness(fake.clone());
+    wait_for(&mut h, "Update now");
+    h.get_by_label("Update now").click();
+    wait_for(&mut h, "Install now");
+    h.get_by_label("Cancel").click();
+    h.run_steps(5);
+    assert!(h.query_by_label("Install now").is_none());
+    h.state_mut().check_for_updates();
+    wait_for(&mut h, "Update now");
+    assert!(fake.forced.load(Ordering::SeqCst));
+    h.get_by_label("Update now").click();
+    wait_for(&mut h, "Install now");
+    assert_eq!(fake.downloads.load(Ordering::SeqCst), 2);
+    assert_eq!(fake.installs.load(Ordering::SeqCst), 0);
+    drop(h);
+    assert_eq!(fake.installs.load(Ordering::SeqCst), 0);
+}
+
+#[test]
+fn msi_install_click_guards_edits_made_during_download() {
+    let fake = Arc::new(Fake { msi: true, ..Fake::default() });
+    fake.wait_download.store(true, Ordering::SeqCst);
+    let mut h = harness(fake.clone());
+    document(h.state_mut());
+    wait_for(&mut h, "Update now");
+    h.get_by_label("Update now").click();
+    wait_for(&mut h, "Cancel");
+    dirty(h.state_mut());
+    fake.wait_download.store(false, Ordering::SeqCst);
+    wait_for(&mut h, "Install now");
+    h.get_by_label("Install now").click();
+    wait_for(&mut h, "Do you want to save");
+    assert_eq!(fake.installs.load(Ordering::SeqCst), 0);
+    h.get_by_label("Cancel").click();
+    h.run_steps(5);
+    assert!(h.state().has_unsaved_changes());
+    assert!(h.state().close_batch.is_none());
+    assert_eq!(fake.installs.load(Ordering::SeqCst), 0);
+    h.get_by_label("Install now").click();
+    wait_for(&mut h, "Do you want to save");
+    h.get_by_label("Don't Save").click();
+    h.run_steps(5);
+    assert_eq!(fake.installs.load(Ordering::SeqCst), 1);
+}
+
+#[test]
+fn quitting_while_msi_waits_never_installs() {
+    let fake = Arc::new(Fake { msi: true, ..Fake::default() });
+    let mut h = harness(fake.clone());
+    document(h.state_mut());
+    wait_for(&mut h, "Update now");
+    h.get_by_label("Update now").click();
+    wait_for(&mut h, "Install now");
+    dirty(h.state_mut());
+    let all = h.state().session.documents().iter().map(|doc| doc.uid).collect();
+    h.state_mut().close_documents(all, crate::close_many::After::Quit);
+    wait_for(&mut h, "Do you want to save");
+    h.get_by_label("Don't Save").click();
+    h.run_steps(5);
+    assert!(h.state().quit_confirmed);
+    assert_eq!(fake.installs.load(Ordering::SeqCst), 0);
 }
