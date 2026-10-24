@@ -65,6 +65,7 @@ pub fn title_bar(app: &mut SlideApp, ui: &mut Ui) {
                 .layout(egui::Layout::right_to_left(egui::Align::Center)),
         );
         right.spacing_mut().item_spacing.x = 6.0;
+        crate::account::title_button(app, &mut right);
         search_button(app, &mut right);
         present_button(app, &mut right);
         comments_button(app, &mut right);
@@ -89,8 +90,10 @@ fn narrow_title_bar(app: &mut SlideApp, ui: &mut Ui, rect: Rect) {
     let right = rect.max.x - 10.0;
     let present = present_width(ui);
     let fixed = TITLE_ICON + LEFT_GAP + 2.0 * (44.0 + LEFT_GAP) + 2.0 * (TITLE_ICON + RIGHT_GAP) + present + RIGHT_GAP;
+    let account = app.account_hook.is_some();
     let fit = TitleFit::new(right - left, fixed, |item| match item {
-        TitleItem::Appearance | TitleItem::Comments => TITLE_ICON + RIGHT_GAP,
+        TitleItem::Account if !account => 0.0,
+        TitleItem::Account | TitleItem::Appearance | TitleItem::Comments => TITLE_ICON + RIGHT_GAP,
         TitleItem::PlayFromStart | TitleItem::Home => TITLE_ICON + LEFT_GAP,
     });
     let row = |x0: f32, x1: f32, layout: egui::Layout| {
@@ -112,6 +115,9 @@ fn narrow_title_bar(app: &mut SlideApp, ui: &mut Ui, rect: Rect) {
     rui.spacing_mut().item_spacing.x = RIGHT_GAP;
     if named(icon_toggle(&mut rui, Icon::Close, "Close document", app.session.active().is_some(), false), "Close document").clicked() {
         app.close_presentation();
+    }
+    if fit.shows(TitleItem::Account) {
+        crate::account::title_button(app, &mut rui);
     }
     search_button(app, &mut rui);
     present_button(app, &mut rui);

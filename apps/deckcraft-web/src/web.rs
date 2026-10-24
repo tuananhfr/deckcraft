@@ -53,6 +53,9 @@ pub fn start() {
                     let fullscreen = FullscreenBridge::install(cc.egui_ctx.clone()).ok();
                     let mut app = SlideApp::new(Session::new(), services(inbox.clone(), cc.egui_ctx.clone(), clipboard.clone(), dirty.clone()));
                     app.services.has_touch = web_sys::window().is_some_and(|w| w.navigator().max_touch_points() > 0);
+                    if let Some(account) = crate::account::install() {
+                        app.account_hook = Some(std::sync::Arc::new(account));
+                    }
                     if let Some(bridge) = fullscreen.clone() {
                         app.services.show_fullscreen = Some(Box::new(move |showing| bridge.set_showing(showing)));
                     }
