@@ -13,13 +13,16 @@
 //! - preferences are not persisted, except the interface language (`language`), which the
 //!   ERPCons office site shares between its editors;
 //! - no AutoRecover folder: where the page provides a draft store (`window.erpDrafts`, the
-//!   ERPCons office site), unsaved presentations are kept there instead (`draft_bridge`).
+//!   ERPCons office site), unsaved presentations are kept there instead (`draft_bridge`);
+//! - the optional PI ID account is the office site's session (`window.erpAccount`, `account`).
 //!
 //! URL query flags: `?webgl` forces the WebGL2 backend instead of WebGPU; `?blank` starts with an
 //! empty presentation instead of the sample deck; `?show` starts the slide show.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+#[cfg(any(target_arch = "wasm32", test))]
+mod account;
 #[cfg(target_arch = "wasm32")]
 mod audio;
 #[cfg(any(target_arch = "wasm32", test))]

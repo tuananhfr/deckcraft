@@ -446,13 +446,13 @@ fn separator(ui: &mut Ui, t: &Tokens) {
 
 // ---------------------------------------------------------------- shared pieces
 
-fn heading(ui: &mut Ui, text: &str) {
+pub(crate) fn heading(ui: &mut Ui, text: &str) {
     let t = Tokens::get(ui.ctx());
     ui.label(RichText::new(crate::tl!(text)).font(theme::bold(16.0)).color(t.text));
     ui.add_space(8.0);
 }
 
-fn dim(ui: &mut Ui, text: &str) {
+pub(crate) fn dim(ui: &mut Ui, text: &str) {
     let t = Tokens::get(ui.ctx());
     ui.label(RichText::new(text).font(theme::font(12.5)).color(t.text_dim));
 }
@@ -1238,6 +1238,12 @@ fn bullets(ui: &mut Ui, items: &[&str]) {
 /// there is nothing to sign in to.
 fn account(app: &mut SlideApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
+    // An installed PI ID account takes the "no accounts" note's place, at the top of the page.
+    let pi_account = app.account_hook.is_some();
+    if pi_account {
+        crate::account::section(app, ui);
+        ui.add_space(28.0);
+    }
     ui.horizontal_top(|ui| {
         ui.vertical(|ui| {
             ui.set_width(340.0);
@@ -1253,9 +1259,11 @@ fn account(app: &mut SlideApp, ui: &mut Ui) {
                     }
                 },
             );
-            ui.add_space(16.0);
-            heading(ui, "User Information");
-            dim(ui, &app.product_text("DeckCraft has no accounts: there is nothing to sign in to, and your presentations stay on your device."));
+            if !pi_account {
+                ui.add_space(16.0);
+                heading(ui, "User Information");
+                dim(ui, &app.product_text("DeckCraft has no accounts: there is nothing to sign in to, and your presentations stay on your device."));
+            }
         });
         ui.add_space(40.0);
         ui.vertical(|ui| {

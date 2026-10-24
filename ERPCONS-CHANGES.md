@@ -1,5 +1,6 @@
 # ERPCons changes
 
+- PI ID account (both, off unless configured): a PI ID section at the top of File › Account (in place of the "no accounts" note), a title-bar account button and a paid-licence expiry notice appear only with an account hook: desktop builds made with `ERPCONS_PI_ISSUER` (`erpcons-account` v0.1.0 on a worker thread) and the web app when the office shell offers an enabled `window.erpAccount` v1. `SlideApp::allowed(feature)` is in place for future gating; nothing is gated.
 - Desktop releases: publish a deterministic CycloneDX 1.5 Cargo dependency SBOM with licenses, lockfile checksums and dependency edges, included in release SHA256SUMS.
 - Document drafts (web): report per-document revisions, dirty, pending, committed and failed checkpoints to the optional ERPCons shell v2 bridge, including tab switches and restored draft ids.
 

@@ -6,6 +6,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+pub mod account;
 pub mod backstage;
 pub mod canvas;
 pub mod clipboard;
@@ -316,6 +317,10 @@ pub struct SlideApp {
     pub update_hook: Option<std::sync::Arc<dyn updates::UpdateHook>>,
     #[cfg(not(target_arch = "wasm32"))]
     updates: updates::Updates,
+    /// ERPCons: the optional PI ID account ([`account`]). `None` (the default) shows no account UI
+    /// and allows every feature.
+    pub account_hook: Option<std::sync::Arc<dyn account::AccountHook>>,
+    pub(crate) account: account::AccountState,
     /// Close All, Close Others or quitting, while its prompt is open.
     pub(crate) close_batch: Option<close_many::CloseBatch>,
     /// Saving and failed saves, for the title bar.
@@ -385,6 +390,8 @@ impl SlideApp {
             update_hook: None,
             #[cfg(not(target_arch = "wasm32"))]
             updates: Default::default(),
+            account_hook: None,
+            account: Default::default(),
             close_batch: None,
             save_status: Default::default(),
             loss_warning: Default::default(),
@@ -1070,6 +1077,7 @@ impl SlideApp {
         i18n::set_current(i18n::Lang::from_pref(&self.ui.language));
         #[cfg(not(target_arch = "wasm32"))]
         self.poll_updates(ctx);
+        account::poll(self, ctx);
         let scale = self.ui.ui_scale.clamp(0.5, 3.0);
         if (ctx.zoom_factor() - scale).abs() > 1e-3 {
             ctx.set_zoom_factor(scale);
@@ -1341,6 +1349,7 @@ impl SlideApp {
         });
         toast::note_missing_fonts(self);
         toast::show(self, &ctx);
+        account::warning_notice(self, &ctx);
         dialogs::show(self, &ctx);
         #[cfg(not(target_arch = "wasm32"))]
         updates::dialog(self, &ctx);
@@ -1516,6 +1525,9 @@ mod open_refused_tests;
 
 #[cfg(test)]
 mod narrow_tests;
+
+#[cfg(test)]
+mod account_tests;
 
 #[cfg(test)]
 mod touch_tests;

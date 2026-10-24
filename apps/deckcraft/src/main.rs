@@ -12,6 +12,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+mod account;
 #[cfg(target_os = "macos")]
 mod apple_events;
 mod audio;
@@ -277,6 +278,12 @@ fn main() -> eframe::Result {
             }
             load_prefs(&mut app);
             i18n::set_current(i18n::Lang::from_pref(&app.ui.language));
+            // Runs without preferences (tests, headless control) keep away from the user's credential store too.
+            if std::env::var_os("DECKCRAFT_NO_PREFS").is_none()
+                && let Some(account) = account::install()
+            {
+                app.account_hook = Some(std::sync::Arc::new(account));
+            }
             // AutoRecover: reopen what a previous run left unsaved, then keep it current.
             if std::env::var_os("DECKCRAFT_NO_RECOVERY").is_none() {
                 app.session.recovery_dir = recovery_dir();
