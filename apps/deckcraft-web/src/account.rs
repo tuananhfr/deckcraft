@@ -23,6 +23,7 @@ pub(crate) fn error_of(error: &Value) -> Option<AccountError> {
     let retry_after_secs = error.get("retryAfter").and_then(Value::as_f64).filter(|s| s.is_finite() && *s >= 0.0).map(|s| s.ceil() as u64);
     Some(match code {
         "cancelled" => AccountError::Cancelled,
+        "popup_blocked" => AccountError::PopupBlocked,
         "network" | "discovery_failed" => AccountError::Network,
         "timeout" => AccountError::Timeout,
         // The shell treats an exhausted quota like a refusal, not as something to wait out.
@@ -361,7 +362,7 @@ mod tests {
             ("session_expired", AccountError::ReauthRequired),
             ("insufficient_scope", AccountError::ReauthRequired),
             ("dependency_unavailable", AccountError::ServiceUnavailable),
-            ("popup_blocked", AccountError::Other),
+            ("popup_blocked", AccountError::PopupBlocked),
             ("sign_in_failed", AccountError::Other),
         ] {
             assert_eq!(error_of(&json!({"code": code, "retryAfter": null})), Some(error), "{code}");

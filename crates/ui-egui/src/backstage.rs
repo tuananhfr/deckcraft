@@ -25,6 +25,8 @@ const ITEM_H: f32 = 40.0;
 const BACK_H: f32 = 46.0;
 /// The widest a page's content grows.
 const CONTENT_W: f32 = 1180.0;
+/// Around a page's content.
+const PAGE_MARGIN: egui::Margin = egui::Margin { left: 48, right: 36, top: 22, bottom: 32 };
 
 /// A page of the File tab.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -385,7 +387,7 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
         w.hovered.bg_stroke = Stroke::new(1.0, t.accent);
         w.active.bg_stroke = Stroke::new(1.0, t.accent);
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-            egui::Frame::NONE.inner_margin(egui::Margin { left: 48, right: 36, top: 22, bottom: 32 }).show(ui, |ui| {
+            egui::Frame::NONE.inner_margin(PAGE_MARGIN).show(ui, |ui| {
                 ui.set_max_width(CONTENT_W);
                 if bs.page != Page::Home {
                     ui.label(RichText::new(crate::tl!(bs.page.label())).font(theme::bold(22.0)).color(t.text));
@@ -1238,57 +1240,88 @@ fn bullets(ui: &mut Ui, items: &[&str]) {
 /// there is nothing to sign in to.
 fn account(app: &mut SlideApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
+    // `set_max_width(CONTENT_W)` widens the page past a narrow window; keep to what is visible.
+    let visible = ui.clip_rect().right() - f32::from(PAGE_MARGIN.right) - ui.max_rect().left();
+    ui.set_max_width(ui.available_width().min(visible));
     // An installed PI ID account takes the "no accounts" note's place, at the top of the page.
     let pi_account = app.account_hook.is_some();
     if pi_account {
         crate::account::section(app, ui);
         ui.add_space(28.0);
     }
-    ui.horizontal_top(|ui| {
-        ui.vertical(|ui| {
-            ui.set_width(340.0);
-            heading(ui, "Appearance");
-            let dark = app.ui.brightness == theme::Brightness::Dark;
-            egui::ComboBox::from_id_salt("backstage_appearance").width(260.0).selected_text(crate::tl!(if dark { "Dark" } else { "Light" })).show_ui(
-                ui,
-                |ui| {
-                    for (on, label) in [(false, "Light"), (true, "Dark")] {
-                        if ui.selectable_label(dark == on, crate::tl!(label)).clicked() {
-                            let _ = app.run("view.dark", json!({"on": on}));
-                        }
-                    }
-                },
-            );
-            if !pi_account {
-                ui.add_space(16.0);
-                heading(ui, "User Information");
-                dim(ui, &app.product_text("DeckCraft has no accounts: there is nothing to sign in to, and your presentations stay on your device."));
-            }
-        });
-        ui.add_space(40.0);
-        ui.vertical(|ui| {
-            heading(ui, "Product Information");
-            ui.horizontal(|ui| {
-                let (r, _) = ui.allocate_exact_size(vec2(40.0, 40.0), Sense::hover());
-                app.paint_product_logo(ui, r);
-                ui.label(RichText::new(app.product_name).font(theme::bold(24.0)).color(t.text));
+    // Side by side only while the product column keeps room for its tile and text; a narrow
+    // window stacks them so nothing is cut off on the right.
+    if ui.available_width() >= ACCOUNT_COLUMN_W + ACCOUNT_GAP + PRODUCT_MIN_W {
+        ui.horizontal_top(|ui| {
+            ui.vertical(|ui| {
+                ui.set_width(ACCOUNT_COLUMN_W);
+                appearance(app, ui, pi_account);
             });
-            dim(ui, &crate::dialogs::version_line());
-            dim(ui, crate::tl!("Open source under MIT OR Apache-2.0. Not affiliated with Microsoft."));
-            ui.add_space(14.0);
-            if task(
-                ui,
-                Icon::Help,
-                &app.product_text("About DeckCraft"),
-                &app.product_text("About DeckCraft"),
-                "The version, the people and models who built it, and where to find us.",
-                true,
-            ) {
-                let _ = app.run("app.about", json!({}));
-            }
-            ui.hyperlink_to(crate::tl!("Source on GitHub"), deckcraft_engine::links::GITHUB);
+            ui.add_space(ACCOUNT_GAP);
+            ui.vertical(|ui| product_information(app, ui, &t));
         });
+    } else {
+        ui.vertical(|ui| {
+            ui.set_max_width(ui.available_width().min(ACCOUNT_COLUMN_W));
+            appearance(app, ui, pi_account);
+            ui.add_space(28.0);
+            product_information(app, ui, &t);
+        });
+    }
+}
+
+const ACCOUNT_COLUMN_W: f32 = 340.0;
+const ACCOUNT_GAP: f32 = 40.0;
+/// The About tile (88) and a gap, plus room for its text without splitting words.
+const PRODUCT_MIN_W: f32 = 260.0;
+
+fn appearance(app: &mut SlideApp, ui: &mut Ui, pi_account: bool) {
+    heading(ui, "Appearance");
+    let dark = app.ui.brightness == theme::Brightness::Dark;
+    egui::ComboBox::from_id_salt("backstage_appearance")
+        .width(ui.available_width().min(260.0))
+        .selected_text(crate::tl!(if dark { "Dark" } else { "Light" }))
+        .show_ui(ui, |ui| {
+            for (on, label) in [(false, "Light"), (true, "Dark")] {
+                if ui.selectable_label(dark == on, crate::tl!(label)).clicked() {
+                    let _ = app.run("view.dark", json!({"on": on}));
+                }
+            }
+        });
+    if !pi_account {
+        ui.add_space(16.0);
+        heading(ui, "User Information");
+        dim(ui, &app.product_text("DeckCraft has no accounts: there is nothing to sign in to, and your presentations stay on your device."));
+    }
+}
+
+fn product_information(app: &mut SlideApp, ui: &mut Ui, t: &Tokens) {
+    heading(ui, "Product Information");
+    ui.horizontal(|ui| {
+        let (r, _) = ui.allocate_exact_size(vec2(40.0, 40.0), Sense::hover());
+        app.paint_product_logo(ui, r);
+        ui.add(egui::Label::new(RichText::new(app.product_name).font(theme::bold(24.0)).color(t.text)).truncate());
     });
+    dim(ui, &crate::dialogs::version_line());
+    dim(ui, crate::tl!("Open source under MIT OR Apache-2.0. Not affiliated with Microsoft."));
+    ui.add_space(14.0);
+    let about = app.product_text("About DeckCraft");
+    let detail = "The version, the people and models who built it, and where to find us.";
+    let clicked = if ui.available_width() >= PRODUCT_MIN_W {
+        task(ui, Icon::Help, &about, &about, detail, true)
+    } else {
+        // Beside the tile, a phone-width column would split words; the text goes under it.
+        let clicked = square_button(ui, Icon::Help, &about, true).clicked();
+        ui.add_space(6.0);
+        ui.label(RichText::new(crate::tl!(&about)).font(theme::font(15.0)).color(t.text));
+        dim(ui, crate::tl!(detail));
+        ui.add_space(14.0);
+        clicked
+    };
+    if clicked {
+        let _ = app.run("app.about", json!({}));
+    }
+    ui.hyperlink_to(crate::tl!("Source on GitHub"), deckcraft_engine::links::GITHUB);
 }
 
 #[cfg(test)]
