@@ -28,7 +28,7 @@ pub(crate) fn section(app: &mut SlideApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
     let mut action = None;
     ui.vertical(|ui| {
-        ui.set_max_width(SECTION_W);
+        ui.set_max_width(ui.available_width().min(SECTION_W));
         heading(ui, "User Information");
         match &snapshot.view {
             AccountView::Guest => {
@@ -68,9 +68,10 @@ pub(crate) fn section(app: &mut SlideApp, ui: &mut Ui) {
 
 fn signed_in(ui: &mut Ui, view: &SignedInView, busy: bool, t: &Tokens, action: &mut Option<Action>) {
     let name = display_name(view);
-    ui.label(RichText::new(&name).font(theme::bold(18.0)).color(t.text));
+    // One line, cut with "…" (full text on hover): wrapping would split an address mid-word.
+    ui.add(egui::Label::new(RichText::new(&name).font(theme::bold(18.0)).color(t.text)).truncate());
     if let Some(email) = view.email.as_deref().filter(|e| *e != name) {
-        dim(ui, email);
+        ui.add(egui::Label::new(RichText::new(email).font(theme::font(12.5)).color(t.text_dim)).truncate());
     }
     if view.reauth_required {
         ui.add_space(10.0);
@@ -88,14 +89,8 @@ fn signed_in(ui: &mut Ui, view: &SignedInView, busy: bool, t: &Tokens, action: &
             Some(id) => view.orgs.iter().find(|o| &o.id == id).map_or_else(|| id.clone(), |o| o.name.clone()),
             None => personal.clone(),
         };
-        egui::ComboBox::from_id_salt("account_org").width(260.0).selected_text(selected).show_ui(ui, |ui| {
-            let orgs = view.orgs.iter().map(|org| {
-                let label = match &org.role {
-                    Some(role) => format!("{} ({role})", org.name),
-                    None => org.name.clone(),
-                };
-                (Some(org.id.clone()), label)
-            });
+        egui::ComboBox::from_id_salt("account_org").width(ui.available_width().min(260.0)).truncate().selected_text(selected).show_ui(ui, |ui| {
+            let orgs = view.orgs.iter().map(|org| (Some(org.id.clone()), org.name.clone()));
             for (id, label) in std::iter::once((None, personal.clone())).chain(orgs) {
                 let current = view.active_org == id;
                 if ui.selectable_label(current, label).clicked() && !current {
@@ -178,7 +173,7 @@ fn display_name(view: &SignedInView) -> String {
 }
 
 fn initial(view: &SignedInView) -> Option<String> {
-    view.name.chars().chain(view.email.iter().flat_map(|e| e.chars())).find(|c| c.is_alphanumeric()).map(|c| c.to_uppercase().collect())
+    crate::account::avatar_letter(&view.name, view.email.as_deref())
 }
 
 /// The title bar's account button: the user's initial when signed in, a person otherwise. It
@@ -278,6 +273,7 @@ fn local_date(unix_secs: i64) -> Option<deckcraft_text::datetime::DateTime> {
 pub fn error_text(error: AccountError) -> Option<String> {
     let text = match error {
         AccountError::Cancelled => return None,
+        AccountError::PopupBlocked => tl!("The browser blocked the sign-in window. Allow pop-ups for this site and try again."),
         AccountError::Network => tl!("Could not reach PI ID. Check your connection and try again."),
         AccountError::Timeout => tl!("PI ID took too long to answer. Try again."),
         AccountError::Denied => tl!("PI ID refused the request. Free features keep working."),
@@ -335,6 +331,7 @@ mod tests {
     #[test]
     fn every_error_and_licence_line_is_translated() {
         let errors = [
+            AccountError::PopupBlocked,
             AccountError::Network,
             AccountError::Timeout,
             AccountError::Denied,

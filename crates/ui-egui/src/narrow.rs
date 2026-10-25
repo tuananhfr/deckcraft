@@ -102,17 +102,17 @@ pub fn floating_pane(ui: &Ui, id: &'static str, side: Side, width: f32, frame: e
 /// Title-bar controls a narrow window may hide, in the order they give way.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TitleItem {
+    Appearance,
+    Comments,
     /// The PI ID account button; without an account hook it takes no room. File › Account stays
     /// reachable when it gives way.
     Account,
-    Appearance,
-    Comments,
     PlayFromStart,
     Home,
 }
 
 pub const TITLE_DROP_ORDER: [TitleItem; 5] =
-    [TitleItem::Account, TitleItem::Appearance, TitleItem::Comments, TitleItem::PlayFromStart, TitleItem::Home];
+    [TitleItem::Appearance, TitleItem::Comments, TitleItem::Account, TitleItem::PlayFromStart, TitleItem::Home];
 
 /// How many of [`TITLE_DROP_ORDER`] a narrow title bar hides.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]

@@ -1532,6 +1532,7 @@
 	Signing in…	Đang đăng nhập…
 	Sign in	Đăng nhập
 	Paid features expire on {date}. Connect to the internet to renew them.	Tính năng trả phí hết hạn ngày {date}. Hãy kết nối Internet để gia hạn.
+	The browser blocked the sign-in window. Allow pop-ups for this site and try again.	Trình duyệt đã chặn cửa sổ đăng nhập. Hãy cho phép cửa sổ bật lên cho trang này rồi thử lại.
 	Could not reach PI ID. Check your connection and try again.	Không kết nối được PI ID. Hãy kiểm tra mạng rồi thử lại.
 	PI ID took too long to answer. Try again.	PI ID phản hồi quá lâu. Hãy thử lại.
 	PI ID refused the request. Free features keep working.	PI ID đã từ chối yêu cầu. Các tính năng miễn phí vẫn dùng bình thường.

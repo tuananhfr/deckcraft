@@ -9,9 +9,9 @@ use std::sync::{
 
 use deckcraft_engine::Session;
 use egui::accesskit::Role;
-use egui::{Rect, vec2};
+use egui::{Rect, pos2, vec2};
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable, by};
 use serde_json::json;
 
 use crate::account::{AccountError, AccountHook, AccountSnapshot, AccountView, LicenceView, OrgView, SignedInView, WarningView, date_text};
@@ -181,7 +181,7 @@ fn the_signed_in_page_switches_organization_and_signs_out() {
     let picker = h.get_all_by_role(Role::ComboBox).min_by(|a, b| a.rect().top().total_cmp(&b.rect().top())).expect("organization picker");
     picker.click();
     h.run_steps(3);
-    h.get_by_label("Công ty Xây dựng Ví dụ (member)");
+    h.get_by_label("Công ty Xây dựng Ví dụ");
     h.get_by_label("Văn phòng Kiến trúc Mẫu").click();
     h.run_steps(3);
     assert_eq!(fake.calls(), ["select_org:Some(\"org_b\")"]);
@@ -266,6 +266,10 @@ fn errors_read_in_plain_language_and_a_cancel_is_silent() {
     fake.set(AccountView::Guest, Some(AccountError::RateLimited { retry_after_secs: Some(120) }));
     h.run_steps(2);
     h.get_by_label("PI ID đang bận. Hãy thử lại sau 2 phút.");
+    fake.set(AccountView::Guest, Some(AccountError::PopupBlocked));
+    h.run_steps(2);
+    h.get_by_label("Trình duyệt đã chặn cửa sổ đăng nhập. Hãy cho phép cửa sổ bật lên cho trang này rồi thử lại.");
+    h.get_by_label("Đăng nhập bằng PI ID");
     fake.set(AccountView::Guest, Some(AccountError::Cancelled));
     h.run_steps(2);
     assert!(h.query_by_label_contains("thử lại").is_none(), "a cancelled sign-in is not an error");
@@ -319,12 +323,51 @@ fn the_account_button_never_crowds_a_narrow_title_bar() {
                 assert!(bar.iter().any(|(l, _)| l == i18n::tr(lang, must)), "{must} stays at {width}");
             }
             assert_apart("title bar", width, &bar);
-            if width >= 599.0 {
-                assert!(bar.iter().any(|(l, _)| l == i18n::tr(lang, label)), "the account button shows when there is room");
+            // Appearance and Comments give way before the account button, so a phone keeps it.
+            if width >= 390.0 {
+                assert!(bar.iter().any(|(l, _)| l == i18n::tr(lang, label)), "the account button shows at {width}");
             }
             // File › Account stays reachable when the button gives way.
             open_account_page(&mut h);
             assert_eq!(page(&h), Some(Page::Account));
+        }
+    }
+}
+
+#[test]
+fn a_phone_wide_account_page_keeps_every_line_inside_the_page() {
+    const PHONE_W: f32 = 390.0;
+    // The Backstage nav on the left and the page's right margin.
+    let page = Rect::from_min_max(pos2(crate::backstage::NAV_W, crate::ribbon::NARROW_TITLE_H), pos2(PHONE_W - 36.0, PHONE_H));
+    let long = AccountView::SignedIn(SignedInView {
+        name: "Nguyễn Thị Phương Thảo Hoàng Anh".into(),
+        email: Some("phuongthao.hoang.nguyen@congty-xaydung-vidu.com.vn".into()),
+        orgs: vec![OrgView { id: "org_a".into(), name: "Công ty Cổ phần Xây dựng và Kiến trúc Ví dụ Miền Nam".into(), role: None }],
+        active_org: Some("org_a".into()),
+        licence: LicenceView::Free,
+        warning: None,
+        online: false,
+        session_only: false,
+        reauth_required: false,
+    });
+    for (view, code) in [(long.clone(), "vi"), (long, "en"), (signed_in(LicenceView::Free, None), "vi"), (AccountView::Guest, "en")] {
+        let mut h = harness(Some(Fake::with(view.clone())), vec2(PHONE_W, PHONE_H), code);
+        open_account_page(&mut h);
+        let shown: Vec<_> = h
+            .query_all(by().predicate(|n| matches!(n.role(), Role::Label | Role::Button | Role::ComboBox | Role::Link)))
+            .map(|n| (format!("{:?}", n.accesskit_node().label().or(n.accesskit_node().value())), n.rect()))
+            .filter(|(_, r)| r.center().x > page.left() && r.top() >= page.top())
+            .collect();
+        assert!(shown.len() >= 8, "the page is drawn: {shown:?}");
+        for (label, r) in &shown {
+            assert!(r.left() >= page.left() - 0.5 && r.right() <= page.right() + 0.5, "{code} {view:?}: {label} {r:?} leaves the page {page:?}");
+        }
+        if let AccountView::SignedIn(v) = &view {
+            // One line each (cut with "…"), never wrapped mid-word. The title-bar button shares the name.
+            let on_page = |label: &str| h.query_all_by_label(label).map(|n| n.rect()).find(|r| page.contains(r.center())).expect(label);
+            assert!(on_page(&v.name).height() <= 18.0 * 1.5, "{} wraps", v.name);
+            let email = v.email.as_deref().unwrap();
+            assert!(on_page(email).height() <= 12.5 * 1.5, "{email} wraps");
         }
     }
 }
@@ -364,4 +407,11 @@ fn account_screenshots() {
     let mut h = harness(None, DESKTOP, "en");
     open_account_page(&mut h);
     save(&mut h, "account-no-hook-en.png");
+
+    for (width, height) in [(390.0, PHONE_H), (1280.0, 800.0)] {
+        let mut h = harness(Some(Fake::with(signed_in(LicenceView::Free, None))), vec2(width, height), "vi");
+        save(&mut h, &format!("deckcraft-title-bar-signed-in-{width:.0}.png"));
+        open_account_page(&mut h);
+        save(&mut h, &format!("deckcraft-account-signed-in-{width:.0}.png"));
+    }
 }
