@@ -233,6 +233,9 @@ pub struct DocState {
     /// Opened by the app, not the user (the built-in sample, the web build's blank start
     /// presentation): untouched, it gives way to the next one ([`Session::add_document`]).
     pub placeholder: bool,
+    /// Kept for `file.reopenClosed` once closed; off for a document a host keeps (the office
+    /// site's online documents), which would reopen as a local copy.
+    pub reopenable: bool,
 }
 
 static NEXT_UID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
@@ -258,6 +261,7 @@ impl DocState {
             save_as_pptx,
             composition: None,
             placeholder: false,
+            reopenable: true,
         }
     }
     pub fn is_dirty(&self) -> bool {

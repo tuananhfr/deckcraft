@@ -54,7 +54,7 @@ enum Step {
 impl SlideApp {
     /// Presentation `uid` has unsaved changes, or a save of it hasn't finished.
     fn unsaved(&self, uid: u64) -> bool {
-        self.session.documents().iter().any(|d| d.uid == uid && d.is_dirty()) || self.pending_saves.iter().any(|p| p.uid == uid)
+        self.session.documents().iter().any(|d| d.uid == uid && d.is_dirty()) || self.save_in_flight(uid)
     }
 
     /// Closes the presentations `uids`. When some have unsaved changes, one prompt asks about all
@@ -99,7 +99,7 @@ impl SlideApp {
                 queue.remove(0);
                 continue;
             };
-            if self.pending_saves.iter().any(|p| p.uid == uid) {
+            if self.save_in_flight(uid) {
                 b.needs_click = true;
                 return Step::Waiting(uid);
             }

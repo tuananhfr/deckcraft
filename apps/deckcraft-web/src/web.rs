@@ -54,7 +54,9 @@ pub fn start() {
                     let dropped = DroppedFiles::default();
                     let clipboard = ClipboardBridge::install(cc.egui_ctx.clone()).ok();
                     let fullscreen = FullscreenBridge::install(cc.egui_ctx.clone()).ok();
-                    let services = services(inbox.clone(), dropped.clone(), cc.egui_ctx.clone(), clipboard.clone(), dirty.clone());
+                    let erp_host = crate::erp_host::install(cc.egui_ctx.clone());
+                    let mut services = services(inbox.clone(), dropped.clone(), cc.egui_ctx.clone(), clipboard.clone(), dirty.clone());
+                    services.host_documents = erp_host.as_ref().map(crate::erp_host::ErpHost::documents);
                     let mut app = SlideApp::new(Session::new(), services);
                     app.services.has_touch = web_sys::window().is_some_and(|w| w.navigator().max_touch_points() > 0);
                     if let Some(account) = crate::account::install() {
@@ -81,7 +83,7 @@ pub fn start() {
                     if q.contains("show") {
                         app.start_show(0, false);
                     }
-                    Ok(Box::new(WebShell { app, inbox, dropped, dirty, drafts: DraftBridge::new(), language, clipboard, fullscreen }))
+                    Ok(Box::new(WebShell { app, inbox, dropped, dirty, drafts: DraftBridge::new(), erp_host, language, clipboard, fullscreen }))
                 }),
             )
             .await;
@@ -107,6 +109,8 @@ struct WebShell {
     /// Read by the `beforeunload` guard, which can't reach the app.
     dirty: Rc<Cell<bool>>,
     drafts: DraftBridge,
+    /// The office site's online documents, when the page offers `window.erpHost`.
+    erp_host: Option<crate::erp_host::ErpHost>,
     /// The interface language last remembered, to save it only when it changes.
     language: String,
     clipboard: Option<ClipboardBridge>,
@@ -151,6 +155,9 @@ impl eframe::App for WebShell {
             }
         }
         self.drafts.logic(&mut self.app, ctx);
+        if let Some(erp_host) = &mut self.erp_host {
+            erp_host.logic(&mut self.app);
+        }
         if self.app.ui.language != self.language {
             self.language.clone_from(&self.app.ui.language);
             crate::language::remember(&self.language);
@@ -168,8 +175,11 @@ impl eframe::App for WebShell {
         self.app.ui(ui);
         self.sync_fullscreen();
         // After `ui`, where typing edits the presentation, so the guard is never a frame behind.
-        self.dirty.set(self.app.has_unsaved_changes());
+        self.dirty.set(self.app.has_unsaved_local_changes());
         self.drafts.after_frame(&self.app, ui.ctx());
+        if let Some(wait) = self.erp_host.as_mut().and_then(|erp_host| erp_host.after_frame(&self.app)) {
+            ui.ctx().request_repaint_after(std::time::Duration::from_millis(wait.ceil() as u64));
+        }
     }
 }
 

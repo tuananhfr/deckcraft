@@ -52,7 +52,7 @@ impl SaveState {
 impl SlideApp {
     /// Saving or a failed save of presentation `uid`; None when neither.
     pub fn save_state(&self, uid: u64) -> Option<SaveState> {
-        if self.save_status.queued.is_some_and(|q| q.0 == uid) || self.pending_saves.iter().any(|p| p.uid == uid) {
+        if self.save_status.queued.is_some_and(|q| q.0 == uid) || self.save_in_flight(uid) {
             return Some(SaveState::Saving);
         }
         let f = self.save_status.failures.get(&uid)?;
