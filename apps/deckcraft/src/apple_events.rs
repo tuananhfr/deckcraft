@@ -32,7 +32,7 @@ pub fn poll(inbox: &Inbox, app: &mut SlideApp, ctx: &egui::Context) {
             Event::Open(paths) => {
                 for p in paths.iter().filter_map(|p| p.to_str()) {
                     if let Err(e) = app.open_path(p) {
-                        log::error!("{p}: {e}");
+                        crate::log_open_failure(p, &e);
                     }
                 }
             }

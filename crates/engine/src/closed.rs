@@ -48,13 +48,13 @@ impl ClosedDocs {
         }
         match deckcraft_format::save(&d.doc) {
             Ok(bytes) => self.push(ClosedDoc { title: d.title(), path: d.path.clone(), unsaved: d.is_dirty(), bytes }),
-            Err(e) => log::warn!("couldn't keep closed presentation {}: {e}", d.title()),
+            Err(e) => log::warn!("couldn't keep a closed presentation: {e}"),
         }
     }
 
     pub fn push(&mut self, c: ClosedDoc) {
         if c.bytes.len() > self.max_bytes {
-            log::info!("closed presentation {} is too large to keep for reopening", c.title);
+            log::info!("a closed presentation of {} bytes is too large to keep for reopening", c.bytes.len());
             return;
         }
         self.entries.push_back(c);

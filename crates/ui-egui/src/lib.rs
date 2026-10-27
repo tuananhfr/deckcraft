@@ -33,6 +33,7 @@ pub mod ribbon;
 mod save_copy;
 pub mod save_state;
 pub mod selpane;
+mod share;
 pub mod shortcuts;
 pub mod show;
 mod show_lifecycle;
@@ -84,6 +85,8 @@ pub enum SaveOutcome {
 /// Reports how a save ended; the host may call it after `save_file` has returned.
 pub type SaveDone = Box<dyn FnOnce(SaveOutcome)>;
 pub type SaveFileFn = Box<dyn FnMut(&str, &[u8], SaveDone)>;
+/// Hands `(name, bytes)` to the system share sheet; false when the host didn't take them.
+pub type ShareFn = Box<dyn FnMut(&str, &[u8]) -> bool>;
 /// Files `(name, bytes)` delivered asynchronously by the host (web file picker, dropped files).
 pub type Inbox = std::sync::Arc<std::sync::Mutex<Vec<(String, Vec<u8>)>>>;
 
@@ -103,6 +106,9 @@ pub struct Services {
     /// Save a presentation as a file the user picks (the browser's save picker, or a download
     /// where there is none). Save and Save As use it over `download` when both are there.
     pub save_file: Option<SaveFileFn>,
+    /// Share a copy of the presentation (the office site's Web Share, web only). It must run
+    /// within the click that asked for it, as browsers open a share sheet only for a click.
+    pub share: Option<ShareFn>,
     /// The last open presentation was explicitly closed.
     pub editor_closed: Option<Box<dyn FnMut()>>,
     /// Fullscreen requests must run synchronously with the gesture starting the show.
@@ -110,6 +116,8 @@ pub struct Services {
     /// Touch capability reported by the host before the first touch event.
     pub has_touch: bool,
     pub inbox: Option<Inbox>,
+    /// How each `inbox` file `(name, byte length)` ended: opened or inserted (true), or refused.
+    pub intake_result: Option<Box<dyn FnMut(&str, usize, bool)>>,
     /// Image on the system clipboard (PNG bytes), when the host can read one.
     pub clipboard_image: Option<Box<dyn FnMut() -> Option<Vec<u8>>>>,
     /// Rich data for the paste delivered in this frame; absent on desktop hosts.
@@ -237,6 +245,7 @@ pub const UI_COMMANDS: &[(&str, &str, Option<&str>, &str)] = &[
     ("app.insertVideoDialog", "Video from File…", None, "{}"),
     ("app.saveAsDialog", "Save As…", Some("F12"), "{}"),
     ("app.exportDialog", "Export…", None, "{}"),
+    ("app.share", "Share…", None, "{}"),
     ("app.dialog", "Open Dialog", None, "{id}"),
     ("app.links", "Project Links", None, "{}"),
 ];
@@ -761,6 +770,16 @@ impl SlideApp {
             "app.insertVideoDialog" => self.pick_and_insert("video", "insert.video"),
             "app.saveAsDialog" => self.save_as_dialog(self.default_save_format()),
             "app.exportDialog" => self.dialog = Some(dialogs::Dialog::new("export")),
+            "app.share" => {
+                if self.services.share.is_none() {
+                    return Err("sharing needs a host with a share sheet (the office site in a browser that shares files)".into());
+                }
+                if self.session.active().is_none() {
+                    return Err("nothing to share: no presentation is open".into());
+                }
+                // A command carries no pointer click, so it downloads; File › Share… shares.
+                self.share_presentation(false);
+            }
             "app.dialog" => {
                 let d = p.get("id").and_then(Value::as_str).ok_or("missing `id`")?;
                 self.dialog = Some(dialogs::Dialog::new(d));
@@ -1031,12 +1050,16 @@ impl SlideApp {
         let Some(inbox) = self.services.inbox.clone() else { return };
         let files: Vec<(String, Vec<u8>)> = inbox.lock().map(|mut v| std::mem::take(&mut *v)).unwrap_or_default();
         for (name, bytes) in files {
-            self.open_or_insert_bytes(&name, &bytes);
+            let ok = self.open_or_insert_bytes(&name, &bytes);
+            if let Some(report) = self.services.intake_result.as_mut() {
+                report(&name, bytes.len(), ok);
+            }
         }
     }
 
-    /// A dropped or picked file: presentations open, media is inserted.
-    pub fn open_or_insert_bytes(&mut self, name: &str, bytes: &[u8]) {
+    /// A dropped or picked file: presentations open, media is inserted. False when it was
+    /// refused: unreadable, a kind DeckCraft can't open, a legacy format or the documents limit.
+    pub fn open_or_insert_bytes(&mut self, name: &str, bytes: &[u8]) -> bool {
         let lower = name.to_ascii_lowercase();
         let data = deckcraft_engine::cmd::base64_encode(bytes);
         let ct = deckcraft_engine::cmd::insert::content_type(name, bytes);
@@ -1058,17 +1081,21 @@ impl SlideApp {
             "slide.fromOutline"
         } else {
             self.set_status(crate::i18n::fmt(&self.product_text("{name}: DeckCraft can't open this kind of file"), &[("name", name)]));
-            return;
+            return false;
         };
         let p = if cmd == "slide.fromOutline" { json!({"text": String::from_utf8_lossy(bytes)}) } else { json!({"name": name, "data": data}) };
         if self.session.active().is_none() && cmd != "file.openBytes" {
             let _ = self.session.execute("file.new", &json!({}));
         }
         if cmd == "file.openBytes" {
-            let _ = self.run(cmd, p);
+            // A legacy .ppt or .odp is answered with its notice: `opened: false`, not an error.
+            self.run(cmd, p).is_ok_and(|r| r.get("opened").and_then(Value::as_bool) != Some(false))
         } else if let Err(e) = self.session.execute(cmd, &p) {
             self.note_refusal(&e);
             self.set_status(e.to_string());
+            false
+        } else {
+            true
         }
     }
 
@@ -1138,7 +1165,9 @@ impl SlideApp {
         for f in ctx.input(|i| i.raw.dropped_files.clone()) {
             let name = f.path().file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "dropped file".into());
             match f.bytes() {
-                Ok(bytes) => self.open_or_insert_bytes(&name, &bytes),
+                Ok(bytes) => {
+                    self.open_or_insert_bytes(&name, &bytes);
+                }
                 Err(e) => self.set_status(e),
             }
         }
@@ -1522,6 +1551,9 @@ mod ime_tests;
 
 #[cfg(test)]
 mod open_refused_tests;
+
+#[cfg(test)]
+mod intake_tests;
 
 #[cfg(test)]
 mod narrow_tests;

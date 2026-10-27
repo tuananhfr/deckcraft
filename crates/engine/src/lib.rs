@@ -21,6 +21,7 @@ mod html_tokens;
 pub mod keys;
 pub mod legacy_format;
 pub mod links;
+pub mod log_safe;
 mod paste_inherit;
 pub mod recovery;
 mod rich_paste;

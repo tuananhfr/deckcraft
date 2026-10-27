@@ -82,7 +82,8 @@ pub fn open_presentation(name: &str, bytes: &[u8]) -> Result<Presentation> {
         return Err(EngineError::LegacyFormat(format));
     }
     let too_large = |name: &str, detail: &str| {
-        log::warn!("{name}: refused by the decompression limits: {detail}");
+        let size = Some(bytes.len() as u64);
+        log::warn!("{}: refused by the decompression limits: {}", crate::log_safe::log_name(name, size), crate::log_safe::redact(detail, name));
         EngineError::FileTooLarge
     };
     if deckcraft_format::sniff(bytes) {

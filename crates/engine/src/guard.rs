@@ -55,7 +55,7 @@ impl Session {
                 if let Some(dir) = self.recovery_dir.clone()
                     && let Err(e) = crate::recovery::save(self, &dir)
                 {
-                    log::error!("recovery save after `{id}` failed: {e}");
+                    log::error!("recovery save after `{id}` failed: {}", crate::log_safe::tilde_home(&e.to_string()));
                 }
                 Err(EngineError::Internal(id.to_string(), msg))
             }

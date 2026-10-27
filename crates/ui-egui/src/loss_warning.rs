@@ -18,6 +18,7 @@ pub(crate) enum Action {
     Export(String, Value),
     Command(String, Value),
     Print(Value),
+    Share,
 }
 
 struct Pending {
@@ -79,7 +80,8 @@ impl SlideApp {
         true
     }
 
-    fn resume_lossy_save(&mut self, copy: bool) {
+    /// `pointer`: the confirmation was a pointer click, which a share sheet needs.
+    fn resume_lossy_save(&mut self, copy: bool, pointer: bool) {
         let Some(pending) = self.loss_warning.pending.take() else { return };
         let Some(index) = self.session.documents().iter().position(|d| d.uid == pending.uid) else { return };
         let active = self.session.active().map(|d| d.uid);
@@ -98,6 +100,8 @@ impl SlideApp {
         self.loss_warning.approved = true;
         if copy {
             match pending.action {
+                // Sharing never renames or marks the presentation saved: a copy is the same share.
+                Action::Share => self.share_presentation(pointer),
                 Action::Export(fmt, extra) => self.export_loss_copy_format(&fmt, extra),
                 Action::Print(extra) => self.export_loss_copy_format("pdf", extra),
                 Action::Command(id, params) if id == "file.export" => self.export_loss_copy(params, &pending.format),
@@ -117,6 +121,7 @@ impl SlideApp {
                 Action::Print(params) => {
                     self.print_pdf(params);
                 }
+                Action::Share => self.share_presentation(pointer),
             }
         }
         self.loss_warning.approved = false;
@@ -162,12 +167,17 @@ pub(crate) fn body(app: &mut SlideApp, ui: &mut egui::Ui, _dialog: &mut Dialog) 
     });
     ui.add_space(8.0);
     let mut choice = None;
+    let mut pointer = false;
     ui.horizontal_wrapped(|ui| {
-        if ui.button(crate::tl!("Save Anyway")).clicked() {
+        let anyway = ui.button(crate::tl!("Save Anyway"));
+        if anyway.clicked() {
             choice = Some(false);
+            pointer = anyway.clicked_by(egui::PointerButton::Primary);
         }
-        if ui.button(crate::tl!("Save a Copy")).clicked() {
+        let copy = ui.button(crate::tl!("Save a Copy"));
+        if copy.clicked() {
             choice = Some(true);
+            pointer = copy.clicked_by(egui::PointerButton::Primary);
         }
         if ui.button(crate::tl!("Cancel")).clicked() {
             cancel(app);
@@ -175,7 +185,7 @@ pub(crate) fn body(app: &mut SlideApp, ui: &mut egui::Ui, _dialog: &mut Dialog) 
         }
     });
     if let Some(copy) = choice {
-        app.resume_lossy_save(copy);
+        app.resume_lossy_save(copy, pointer);
         return true;
     }
     false

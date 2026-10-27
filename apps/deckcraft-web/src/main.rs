@@ -14,7 +14,9 @@
 //!   ERPCons office site shares between its editors;
 //! - no AutoRecover folder: where the page provides a draft store (`window.erpDrafts`, the
 //!   ERPCons office site), unsaved presentations are kept there instead (`draft_bridge`);
-//! - the optional PI ID account is the office site's session (`window.erpAccount`, `account`).
+//! - the optional PI ID account is the office site's session (`window.erpAccount`, `account`);
+//! - with the office site's share sheet (`window.erpShare`), File › Share… hands it a copy
+//!   (`share`), and dropped files report whether they opened (`window.erpIntakeResult`, `intake`).
 //!
 //! URL query flags: `?webgl` forces the WebGL2 backend instead of WebGPU; `?blank` starts with an
 //! empty presentation instead of the sample deck; `?show` starts the slide show.
@@ -33,10 +35,16 @@ mod closed_hook;
 mod draft_bridge;
 #[cfg(any(target_arch = "wasm32", test))]
 mod draft_state;
+#[cfg(any(target_arch = "wasm32", test))]
+mod file_types;
+#[cfg(any(target_arch = "wasm32", test))]
+mod intake;
 #[cfg(target_arch = "wasm32")]
 mod language;
 #[cfg(any(target_arch = "wasm32", test))]
 mod save_errors;
+#[cfg(target_arch = "wasm32")]
+mod share;
 #[cfg(any(target_arch = "wasm32", test))]
 mod show_fullscreen;
 #[cfg(target_arch = "wasm32")]

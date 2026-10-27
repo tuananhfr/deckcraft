@@ -94,7 +94,8 @@ pub fn palette(app: &mut SlideApp, ctx: &egui::Context) {
                 .into_iter()
                 .filter(|c| c.enabled)
                 .map(|c| (c.id.to_string(), c.label.to_string(), c.shortcut))
-                .chain(crate::UI_COMMANDS.iter().map(|c| (c.0.to_string(), c.1.to_string(), c.2)))
+                // Share… needs a click's user activation, which choosing with Enter doesn't carry.
+                .chain(crate::UI_COMMANDS.iter().filter(|c| c.0 != "app.share").map(|c| (c.0.to_string(), c.1.to_string(), c.2)))
                 .filter(|(id, label, _)| {
                     q.is_empty()
                         || label.to_lowercase().contains(&q)
@@ -151,25 +152,26 @@ pub fn palette(app: &mut SlideApp, ctx: &egui::Context) {
 }
 
 /// The application menu tree: (menu, [(label, command id, shortcut)]), "-" = separator. Used by the
-/// native macOS menu bar and as the parity catalogue's live side.
-pub fn menu_tree() -> Vec<(&'static str, Vec<(&'static str, &'static str)>)> {
+/// native macOS menu bar and as the parity catalogue's live side. `share` adds Share… for a host
+/// with a share sheet ([`SlideApp::can_share`]).
+pub fn menu_tree(share: bool) -> Vec<(&'static str, Vec<(&'static str, &'static str)>)> {
+    let mut file = vec![
+        ("New Presentation", "file.new"),
+        ("Open…", "app.openDialog"),
+        ("-", ""),
+        ("Close", "app.closePresentation"),
+        ("Reopen Closed Presentation", "file.reopenClosed"),
+        ("Save", "file.save"),
+        ("Save As…", "app.saveAsDialog"),
+        ("Export…", "app.exportDialog"),
+        ("Print…", "app.print"),
+    ];
+    if share {
+        file.push(("Share…", "app.share"));
+    }
+    file.extend([("-", ""), ("Properties", "file.properties")]);
     vec![
-        (
-            "File",
-            vec![
-                ("New Presentation", "file.new"),
-                ("Open…", "app.openDialog"),
-                ("-", ""),
-                ("Close", "app.closePresentation"),
-                ("Reopen Closed Presentation", "file.reopenClosed"),
-                ("Save", "file.save"),
-                ("Save As…", "app.saveAsDialog"),
-                ("Export…", "app.exportDialog"),
-                ("Print…", "app.print"),
-                ("-", ""),
-                ("Properties", "file.properties"),
-            ],
-        ),
+        ("File", file),
         (
             "Edit",
             vec![

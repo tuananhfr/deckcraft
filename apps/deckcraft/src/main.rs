@@ -24,6 +24,7 @@ mod settings;
 mod updates;
 
 use deckcraft_engine::Session;
+use deckcraft_engine::log_safe::{log_name, redact, tilde_home};
 use deckcraft_ui_egui::i18n;
 use deckcraft_ui_egui::{Services, SlideApp};
 
@@ -119,6 +120,11 @@ fn save_prefs(app: &SlideApp) {
     }
 }
 
+/// File › Open's types. The legacy .ppt and .odp only get the conversion notice, so the picker
+/// leaves them out; one opened another way still shows it.
+const PRESENTATION_EXTS: &[&str] = &["deckcraft", "pptx", "potx", "ppsx", "pptm"];
+const POWERPOINT_EXTS: &[&str] = &["pptx", "potx", "ppsx", "pptm"];
+
 fn services() -> Services {
     let clipboard = std::rc::Rc::new(std::cell::RefCell::new(arboard::Clipboard::new().ok()));
     let copy_clipboard = clipboard.clone();
@@ -139,9 +145,9 @@ fn services() -> Services {
                 ),
                 "video" => d.add_filter(i18n::t("Video"), &["mp4", "m4v", "mov", "webm", "mkv", "wmv"]),
                 _ => d
-                    .add_filter(i18n::t("Presentations"), &["deckcraft", "pptx", "potx", "ppsx", "ppt", "pptm", "odp"])
+                    .add_filter(i18n::t("Presentations"), PRESENTATION_EXTS)
                     .add_filter(PRODUCT_NAME, &["deckcraft"])
-                    .add_filter("PowerPoint", &["pptx", "potx", "ppsx", "ppt", "pptm"])
+                    .add_filter("PowerPoint", POWERPOINT_EXTS)
                     .add_filter(i18n::t("Outline"), &["txt", "md"]),
             };
             d.pick_file().map(|p| p.to_string_lossy().to_string())
@@ -171,6 +177,12 @@ fn services() -> Services {
             .then(|| Box::new(audio::CpalOut::default()) as Box<dyn deckcraft_media::AudioOut>),
         ..Default::default()
     }
+}
+
+/// A document from the command line or Finder that didn't open, without its name or folder.
+pub(crate) fn log_open_failure(path: &str, error: &str) {
+    let size = std::fs::metadata(path).ok().map(|m| m.len());
+    log::error!("couldn't open a {}: {}", log_name(path, size), redact(error, path));
 }
 
 fn recovery_message(n: usize) -> String {
@@ -223,8 +235,8 @@ fn main() -> eframe::Result {
     // leaves no file behind. Records logged until now are written to it first.
     if let Some(logger) = logger {
         match config_dir().map(|d| logger.attach_dir(&d.join(logging::LOG_DIR))) {
-            Some(Ok(path)) => log::info!("log file {}", path.display()),
-            Some(Err(e)) => log::warn!("no log file: {e}"),
+            Some(Ok(path)) => log::info!("log file {}", tilde_home(&path.display().to_string())),
+            Some(Err(e)) => log::warn!("no log file: {}", tilde_home(&e)),
             None => {
                 logger.stderr_only();
                 log::warn!("no log file: no settings directory (HOME, XDG_CONFIG_HOME or APPDATA is not set)");
@@ -294,7 +306,7 @@ fn main() -> eframe::Result {
                         }
                     }
                     Err(e) => {
-                        log::warn!("recovery: {e}");
+                        log::warn!("recovery: {}", tilde_home(&e.to_string()));
                         let message = i18n::t(
                             "Some unsaved presentations could not be recovered. Their recovery files remain on disk; close presentations and restart to try again.",
                         );
@@ -317,7 +329,7 @@ fn main() -> eframe::Result {
             }
             for f in files {
                 if let Err(e) = app.open_path(&f) {
-                    log::error!("{f}: {e}");
+                    log_open_failure(&f, &e);
                 }
             }
             if show {
@@ -370,6 +382,15 @@ mod desktop_tests {
             let suffix =
                 if cfg!(any(target_os = "macos", target_os = "windows")) { "ERPCons/TrinhChieu/Recovery" } else { "ERPCons/TrinhChieu/recovery" };
             assert!(dir.ends_with(suffix), "{}", dir.display());
+        }
+    }
+
+    #[test]
+    fn the_open_picker_offers_only_what_opens() {
+        use deckcraft_engine::legacy_format::{LegacyFormat, detect};
+        for ext in PRESENTATION_EXTS.iter().chain(POWERPOINT_EXTS) {
+            let refused = matches!(detect(&format!("deck.{ext}"), &[]), Some(LegacyFormat::Ppt | LegacyFormat::Odp));
+            assert!(!refused, ".{ext} only opens the conversion notice");
         }
     }
 

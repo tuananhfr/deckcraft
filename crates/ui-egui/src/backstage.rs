@@ -101,6 +101,7 @@ impl Page {
 pub enum Nav {
     Page(Page),
     Save,
+    Share,
     Close,
     Options,
 }
@@ -110,6 +111,7 @@ impl Nav {
         match self {
             Nav::Page(p) => p.label(),
             Nav::Save => "Save",
+            Nav::Share => "Share…",
             Nav::Close => "Close",
             Nav::Options => "Options",
         }
@@ -118,6 +120,7 @@ impl Nav {
         match self {
             Nav::Page(p) => p.icon(),
             Nav::Save => Icon::Save,
+            Nav::Share => Icon::Share,
             Nav::Close => Icon::File,
             Nav::Options => Icon::Settings,
         }
@@ -125,11 +128,16 @@ impl Nav {
 }
 
 /// The side menu, top group then bottom group, in keyboard order. PowerPoint's Share (cloud) is
-/// left out; with nothing open only Home, New and Open stay at the top.
-pub fn entries(has_doc: bool) -> (Vec<Nav>, Vec<Nav>) {
+/// left out; `share` adds Share… (a copy to the host's share sheet) where the host has one. With
+/// nothing open only Home, New and Open stay at the top.
+pub fn entries(has_doc: bool, share: bool) -> (Vec<Nav>, Vec<Nav>) {
     let mut top = vec![Nav::Page(Page::Home), Nav::Page(Page::New), Nav::Page(Page::Open)];
     if has_doc {
-        top.extend([Nav::Page(Page::Info), Nav::Save, Nav::Page(Page::SaveAs), Nav::Page(Page::Print), Nav::Page(Page::Export), Nav::Close]);
+        top.extend([Nav::Page(Page::Info), Nav::Save, Nav::Page(Page::SaveAs), Nav::Page(Page::Print)]);
+        if share {
+            top.push(Nav::Share);
+        }
+        top.extend([Nav::Page(Page::Export), Nav::Close]);
     }
     (top, vec![Nav::Page(Page::Account), Nav::Options])
 }
@@ -241,11 +249,15 @@ fn colours(t: &Tokens) -> (Color32, Color32) {
     (t.chrome, t.card)
 }
 
-/// Runs a side-menu action. Returns the page to show, or None to close the view (Some(current)
-/// leaves it as it is).
-fn act(app: &mut SlideApp, nav: Nav, current: Page) -> Option<Page> {
+/// Runs a side-menu action; `pointer` when a pointer click (not a key) chose it. Returns the page
+/// to show, or None to close the view (Some(current) leaves it as it is).
+fn act(app: &mut SlideApp, nav: Nav, current: Page, pointer: bool) -> Option<Page> {
     match nav {
         Nav::Page(p) => Some(p),
+        Nav::Share => {
+            app.share_presentation(pointer);
+            None
+        }
         Nav::Save => {
             let web = app.services.pick_save.is_none() && app.services.download.is_some();
             let has_path = app.session.active().is_some_and(|d| d.path.is_some());
@@ -276,7 +288,7 @@ pub fn key(app: &mut SlideApp, key: Key, mods: deckcraft_engine::Mods) -> bool {
         return false;
     }
     let has_doc = app.session.active().is_some();
-    let (top, bottom) = entries(has_doc);
+    let (top, bottom) = entries(has_doc, app.can_share());
     let all: Vec<Nav> = top.into_iter().chain(bottom).collect();
     let Some(bs) = app.backstage.as_mut() else { return false };
     match key {
@@ -301,7 +313,7 @@ pub fn key(app: &mut SlideApp, key: Key, mods: deckcraft_engine::Mods) -> bool {
         Key::Enter | Key::Space => {
             let Some(nav) = bs.focus.and_then(|i| all.get(i)).copied() else { return false };
             let current = bs.page;
-            match act(app, nav, current) {
+            match act(app, nav, current, false) {
                 None => app.close_backstage(),
                 Some(p) => {
                     if let Some(bs) = app.backstage.as_mut() {
@@ -325,7 +337,7 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
     }
     let (nav_bg, page_bg) = colours(&t);
     let mut out = Outcome::default();
-    let (top, bottom) = entries(has_doc);
+    let (top, bottom) = entries(has_doc, app.can_share());
     egui::Panel::left("backstage_nav").exact_size(NAV_W).resizable(false).frame(egui::Frame::NONE.fill(nav_bg)).show(ui, |ui| {
         ui.spacing_mut().item_spacing.y = 0.0;
         if has_doc {
@@ -353,9 +365,10 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
             if k == 3 {
                 separator(ui, &t);
             }
-            if nav_item(ui, *nav, &bs, index, &t).clicked() {
+            let item = nav_item(ui, *nav, &bs, index, &t);
+            if item.clicked() {
                 bs.focus = None;
-                match act(app, *nav, bs.page) {
+                match act(app, *nav, bs.page, item.clicked_by(egui::PointerButton::Primary)) {
                     None => out.close = true,
                     Some(p) => out.page = Some(p),
                 }
@@ -367,9 +380,10 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
             ui.add_space(8.0);
             // Bottom-up: draw the last entry first.
             for (k, nav) in bottom.iter().enumerate().rev() {
-                if nav_item(ui, *nav, &bs, first_bottom + k, &t).clicked() {
+                let item = nav_item(ui, *nav, &bs, first_bottom + k, &t);
+                if item.clicked() {
                     bs.focus = None;
-                    match act(app, *nav, bs.page) {
+                    match act(app, *nav, bs.page, item.clicked_by(egui::PointerButton::Primary)) {
                         None => out.close = true,
                         Some(p) => out.page = Some(p),
                     }

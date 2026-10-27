@@ -62,7 +62,7 @@ impl DraftBridge {
                 continue;
             }
             if let Err(e) = drafts.restore(app, &r.key, &r.name, &r.bytes, js_sys::Date::now()) {
-                log::warn!("couldn't open draft {}: {e}", r.key);
+                log::warn!("couldn't open draft {}: {}", r.key, deckcraft_engine::log_safe::redact(&e, &r.name));
             } else if let Some(d) = app.session.active()
                 && let Ok(mut tracking) = self.tracking.try_borrow_mut()
             {
@@ -228,7 +228,7 @@ impl DraftStore for JsStore {
         let result = self.call("put", &args);
         let Some(revision) = revision else {
             if let Err(e) = result {
-                log::warn!("erpDrafts.put({key}) failed: {e}");
+                log::warn!("erpDrafts.put({key}) failed: {}", deckcraft_engine::log_safe::redact(&e, name));
             }
             return;
         };

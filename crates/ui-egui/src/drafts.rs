@@ -164,7 +164,14 @@ impl Drafts {
                 e.stored = true;
             }
             // Retried on the next change rather than every frame.
-            Err(err) => log::warn!("couldn't write a draft of {}: {err}", e.current.name),
+            Err(err) => {
+                let name = &e.current.name;
+                log::warn!(
+                    "couldn't write a draft of a {}: {}",
+                    deckcraft_engine::log_safe::log_name(name, None),
+                    deckcraft_engine::log_safe::redact(&err.to_string(), name)
+                );
+            }
         }
         e.drafted = Some(e.current.doc.clone());
         e.last_put = now;

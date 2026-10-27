@@ -5,14 +5,16 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use deckcraft_engine::Session;
+use deckcraft_engine::log_safe::{log_name, redact};
 use deckcraft_ui_egui::{Inbox, SaveDone, SaveOutcome, Services, SlideApp};
 use wasm_bindgen::JsCast as _;
 
 use crate::clipboard::ClipboardBridge;
 use crate::draft_bridge::DraftBridge;
+use crate::file_types::{PRESENTATION_EXTS, mime_for};
+use crate::intake::DroppedFiles;
 use crate::show_fullscreen::FullscreenBridge;
 
-const PRESENTATION_EXTS: &[&str] = &["deckcraft", "pptx", "potx", "ppsx", "ppt", "pptm", "odp", "txt", "md"];
 const PICTURE_EXTS: &[&str] = &["png", "jpg", "jpeg", "gif", "webp", "bmp", "tif", "tiff"];
 const AUDIO_EXTS: &[&str] = &["wav", "mp3", "m4a", "aac", "flac", "ogg", "opus", "aif", "aiff"];
 const VIDEO_EXTS: &[&str] = &["mp4", "m4v", "mov", "webm"];
@@ -49,9 +51,11 @@ pub fn start() {
                         log::info!("deckcraft-web {}: wgpu backend {:?}", env!("CARGO_PKG_VERSION"), rs.adapter.get_info().backend);
                     }
                     let inbox: Inbox = Inbox::default();
+                    let dropped = DroppedFiles::default();
                     let clipboard = ClipboardBridge::install(cc.egui_ctx.clone()).ok();
                     let fullscreen = FullscreenBridge::install(cc.egui_ctx.clone()).ok();
-                    let mut app = SlideApp::new(Session::new(), services(inbox.clone(), cc.egui_ctx.clone(), clipboard.clone(), dirty.clone()));
+                    let services = services(inbox.clone(), dropped.clone(), cc.egui_ctx.clone(), clipboard.clone(), dirty.clone());
+                    let mut app = SlideApp::new(Session::new(), services);
                     app.services.has_touch = web_sys::window().is_some_and(|w| w.navigator().max_touch_points() > 0);
                     if let Some(account) = crate::account::install() {
                         app.account_hook = Some(std::sync::Arc::new(account));
@@ -77,7 +81,7 @@ pub fn start() {
                     if q.contains("show") {
                         app.start_show(0, false);
                     }
-                    Ok(Box::new(WebShell { app, inbox, dirty, drafts: DraftBridge::new(), language, clipboard, fullscreen }))
+                    Ok(Box::new(WebShell { app, inbox, dropped, dirty, drafts: DraftBridge::new(), language, clipboard, fullscreen }))
                 }),
             )
             .await;
@@ -99,6 +103,7 @@ fn query() -> String {
 struct WebShell {
     app: SlideApp,
     inbox: Inbox,
+    dropped: DroppedFiles,
     /// Read by the `beforeunload` guard, which can't reach the app.
     dirty: Rc<Cell<bool>>,
     drafts: DraftBridge,
@@ -116,15 +121,22 @@ impl eframe::App for WebShell {
         let dropped = ctx.input_mut(|i| std::mem::take(&mut i.raw.dropped_files));
         for f in dropped {
             let inbox = self.inbox.clone();
+            let reads = self.dropped.clone();
             let ctx = ctx.clone();
             wasm_bindgen_futures::spawn_local(async move {
                 let name = f.path().file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "dropped".into());
                 match f.bytes_async().await {
                     Ok(bytes) => {
+                        reads.record(&name, bytes.len());
                         inbox.lock().unwrap_or_else(|e| e.into_inner()).push((name, bytes));
                         ctx.request_repaint();
                     }
-                    Err(e) => log::error!("couldn't read dropped file {name}: {e}"),
+                    Err(e) => {
+                        log::error!("couldn't read a dropped {}: {}", log_name(&name, None), redact(&e.to_string(), &name));
+                        // The shell waits for every file it handed over, readable or not.
+                        let size = crate::intake::byte_length(f.web_file().map_or(0.0, |file| file.size()));
+                        crate::intake::report(&name, size, false);
+                    }
                 }
             });
         }
@@ -171,7 +183,7 @@ impl WebShell {
 
 /// Web services: no file paths, so `pick_open`/`pick_save`/`read` stay `None` and the UI falls
 /// back to `open_async` (browser picker → inbox), `save_file` (Save) and `download` (exports).
-fn services(inbox: Inbox, ctx: egui::Context, clipboard: Option<ClipboardBridge>, dirty: Rc<Cell<bool>>) -> Services {
+fn services(inbox: Inbox, dropped: DroppedFiles, ctx: egui::Context, clipboard: Option<ClipboardBridge>, dirty: Rc<Cell<bool>>) -> Services {
     let open_inbox = inbox.clone();
     let save_ctx = ctx.clone();
     let mut services = Services {
@@ -197,7 +209,14 @@ fn services(inbox: Inbox, ctx: egui::Context, clipboard: Option<ClipboardBridge>
         write: Some(Box::new(|name: &str, bytes: &[u8]| download(name, bytes))),
         download: Some(Box::new(|name: &str, bytes: &[u8]| {
             if let Err(e) = download(name, bytes) {
-                log::error!("download of {name} failed: {e}");
+                log::error!("download of a {} failed: {}", log_name(name, Some(bytes.len() as u64)), redact(&e, name));
+            }
+        })),
+        // Asked once: the answer depends on the browser and on embedding, which don't change.
+        share: crate::share::available().then(|| Box::new(crate::share::share) as deckcraft_ui_egui::ShareFn),
+        intake_result: Some(Box::new(move |name: &str, size: usize, ok: bool| {
+            if dropped.claim(name, size) {
+                crate::intake::report(name, size, ok);
             }
         })),
         save_file: Some(Box::new(move |name: &str, bytes: &[u8], done: SaveDone| save_file(&save_ctx, name, bytes, done))),
@@ -251,6 +270,7 @@ fn save_file(ctx: &egui::Context, path: &str, bytes: &[u8], done: SaveDone) {
         match open_save_picker(&picker, &name) {
             Ok(handle) => {
                 let bytes = bytes.to_vec();
+                let size = Some(bytes.len() as u64);
                 let ctx = ctx.clone();
                 wasm_bindgen_futures::spawn_local(async move {
                     let outcome = match wasm_bindgen_futures::JsFuture::from(handle).await {
@@ -261,7 +281,7 @@ fn save_file(ctx: &egui::Context, path: &str, bytes: &[u8], done: SaveDone) {
                         Err(e) => crate::save_errors::outcome(&js_error_name(&e)),
                     };
                     if let SaveOutcome::Failed(e) = &outcome {
-                        log::error!("couldn't save {name}: {e}");
+                        log::error!("couldn't save a {}: {}", log_name(&name, size), redact(e, &name));
                     }
                     done(outcome);
                     ctx.request_repaint();
@@ -362,16 +382,4 @@ fn download(path: &str, bytes: &[u8]) -> Result<(), String> {
     });
     window.set_timeout_with_callback_and_timeout_and_arguments_0(revoke.unchecked_ref(), 10_000).map_err(js)?;
     Ok(())
-}
-
-fn mime_for(name: &str) -> &'static str {
-    match name.rsplit('.').next().map(str::to_ascii_lowercase).as_deref() {
-        Some("png") => "image/png",
-        Some("jpg" | "jpeg") => "image/jpeg",
-        Some("pdf") => "application/pdf",
-        Some("txt") => "text/plain",
-        Some("pptx") => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-        Some("deckcraft") => "application/zip",
-        _ => "application/octet-stream",
-    }
 }
