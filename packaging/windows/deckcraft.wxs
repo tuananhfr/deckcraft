@@ -94,9 +94,8 @@
         <RegistryValue Root="HKLM" Key="Software\Microsoft\Windows\CurrentVersion\App Paths\deckcraft.exe" Value="[#DeckcraftExe]" Type="string" />
       </Component>
 
-      <Component Id="DeckcraftCli" Guid="3196A0AF-25AB-4613-9160-338043332171">
-        <File Id="DeckcraftCliExe" Source="$(var.BinDir)\deckcraft-cli.exe" KeyPath="yes" />
-      </Component>
+      <!-- No deckcraft-cli.exe: it would edit documents without the PI licence gate. The major
+           upgrade removes the copy that earlier MSIs installed. -->
     </ComponentGroup>
   </Fragment>
 </Wix>

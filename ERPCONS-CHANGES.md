@@ -1,5 +1,9 @@
 # ERPCons changes
 
+## 2026-10-30: Windows releases no longer ship deckcraft-cli
+
+- (desktop, Windows) The MSI and the portable zip contain `deckcraft.exe` without `deckcraft-cli.exe`, whose `run --cmd … --save` and `mcp` edit presentations without the PI licence gate the app now enforces (owner decision, as pdfcraft and UbotCAD did). `packaging/windows/package.ps1` builds only `-p deckcraft`, checks, copies and signs only the app and no longer smoke-tests the CLI; `deckcraft.wxs` drops the `DeckcraftCli` component, so the major upgrade removes the copy earlier MSIs installed. `erpcons-office`'s `build/desktop-win.sh` stops cross-building it. The crate stays in the workspace (tests, `cargo xtask` gates, development and agents). macOS, Linux and FreeBSD packaging still include it; they are not released by ERPCons.
+
 ## 2026-10-30: Editing needs a PI lease on the desktop (erpcons-account v0.5.0)
 
 - `erpcons-account` and its dev-dependency `pi-mock` move to v0.5.0 (ADR 0013: the four Office apps are one PI product, `erpconsoffice`, with one device registration and one lease per machine). The desktop turns `Config::offline_licensing` on (`apps/deckcraft/src/account/config.rs`); releases verify leases with the pinned `PLATFORM_KEYS` (`lease-2026-10`, a compile-time check keeps it non-empty), debug builds also pin `ERPCONS_PI_DEV_LEASE_KEY` (`kid:hex32`, read at run time) for pi-mock or a local PI. The issuer is still read at build time from `ERPCONS_PI_ISSUER` (`ERPCONS_PI_API_BASE` optional) in `apps/deckcraft/src/account.rs`; builds without it install no account and are not gated.
