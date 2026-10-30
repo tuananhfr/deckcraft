@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 use std::io::{Read as _, Write as _};
 use std::net::TcpStream;
+use std::sync::atomic::AtomicBool;
 
 use erpcons_account::{ApiError, ExpiryWarning, Membership, MemorySecretStore, PinnedKey, SignedIn, User};
 use pi_mock::{ORG_A, ORG_B, Scenario, Server};
@@ -50,7 +51,7 @@ fn status_maps_to_the_view() {
         s.user = None;
     }
     let AccountView::SignedIn(view) = view_of(&no_user) else { panic!("signed in") };
-    assert_eq!((view.name.as_str(), view.email), ("", None), "before /v1/me answered");
+    assert_eq!((view.name.as_str(), view.email), ("", None), "before /me answered");
 }
 
 #[test]
@@ -63,6 +64,7 @@ fn licence_states_map_to_the_view() {
     assert_eq!(licence_of(&LicenceState::Inactive { lease_id: "l".into(), expires_at: 9 }), LicenceView::Inactive { expires_at: 9 });
     assert_eq!(licence_of(&LicenceState::DeviceRevoked), LicenceView::DeviceRevoked);
     assert_eq!(licence_of(&LicenceState::DeviceCapReached), LicenceView::DeviceCapReached);
+    assert_eq!(licence_of(&LicenceState::NotEntitled), LicenceView::Free);
     assert_eq!(licence_of(&LicenceState::SessionOnly), LicenceView::SessionOnly);
 }
 
@@ -76,6 +78,7 @@ fn library_errors_map_to_the_error_line() {
             retry_after: retry.map(Duration::from_secs),
             max_devices: None,
             active_devices: None,
+            errors: Box::default(),
         })
     };
     let cases = [
@@ -108,6 +111,14 @@ fn library_errors_map_to_the_error_line() {
         (api(429, "quota_exceeded", None), Some(AccountError::Denied)),
         (api(503, "dependency_unavailable", None), Some(AccountError::ServiceUnavailable)),
         (api(422, "validation_failed", None), Some(AccountError::Other)),
+        // PI's own envelope: UPPERCASE codes, a bare 401 and a bare 500.
+        (api(401, "", None), Some(AccountError::ReauthRequired)),
+        (api(403, "ACCOUNT_LOCKED", None), Some(AccountError::Suspended)),
+        (api(403, "MEMBERSHIP_INACTIVE", None), Some(AccountError::OrgUnavailable)),
+        (api(403, "INSUFFICIENT_SCOPE", None), Some(AccountError::ReauthRequired)),
+        (api(409, "DEVICE_CAP", None), Some(AccountError::DeviceCap)),
+        (api(409, "DEVICE_REVOKED", None), Some(AccountError::DeviceRevoked)),
+        (api(500, "", None), Some(AccountError::ServiceUnavailable)),
     ];
     for (error, expected) in cases {
         assert_eq!(error_view(&error), expected, "{error:?}");
@@ -208,12 +219,13 @@ fn signs_in_switches_organization_and_signs_out_against_pi_mock() {
     assert_eq!(view.email.as_deref(), Some("an.nguyen@example.com"));
     assert!(!view.name.is_empty());
     assert_eq!(view.active_org, None);
-    assert!(matches!(view.licence, LicenceView::Active { pro: false, .. }), "{:?}", view.licence);
+    assert_eq!(view.licence, LicenceView::Free, "Office keeps offline licensing off");
     assert!(view.online && !view.session_only && !view.reauth_required);
     assert_eq!(view.warning, None);
     assert!(hook.allowed("trinhchieu.use"));
 
     hook.select_org(Some(ORG_B.into()));
+    assert_eq!(hook.snapshot().view, AccountView::SigningIn, "the switch waits for the browser");
     wait_for(&hook, "org switch", |s| matches!(&s.view, AccountView::SignedIn(v) if v.active_org.as_deref() == Some(ORG_B)));
     hook.select_org(Some(ORG_A.into()));
     wait_for(&hook, "second org switch", |s| matches!(&s.view, AccountView::SignedIn(v) if v.active_org.as_deref() == Some(ORG_A)));
@@ -225,8 +237,19 @@ fn signs_in_switches_organization_and_signs_out_against_pi_mock() {
     let snapshot = wait_for(&hook, "sign-out", |s| s.view == AccountView::Guest);
     assert_eq!(snapshot.error, None);
 
+    let requests = server.requests();
+    let authorize: Vec<&str> = requests.iter().filter(|r| r.path == "/id/authorize").map(|r| r.query.as_str()).collect();
+    assert_eq!(authorize.len(), 4, "sign-in and three switches each ran PI's authorization");
+    assert!(authorize[1].contains(&format!("org_hint={ORG_B}")) && authorize[2].contains(&format!("org_hint={ORG_A}")));
+    assert!(authorize[3].contains("prompt=select_account") && !authorize[3].contains("org_hint"), "personal is picked on PI's page");
+    for request in &requests {
+        let path = request.path.as_str();
+        let identity_only =
+            (path.starts_with("/id/") && path != "/id/lease-keys.json") || path.starts_with("/.well-known/") || path == "/api/v1/id/me";
+        assert!(identity_only, "Office calls no device, licence or entitlement endpoint: {} {path}", request.method);
+    }
     let dir = dir.path().to_string_lossy().into_owned();
-    for request in server.requests() {
+    for request in &requests {
         assert!(!request.body.contains(&dir) && !request.query.contains(&dir), "a local path left the machine: {} {}", request.method, request.path);
     }
 }
@@ -245,7 +268,7 @@ fn cancel_unblocks_a_sign_in_waiting_for_the_browser() {
     let snapshot = wait_for(&hook, "cancel", |s| s.view == AccountView::Guest);
     assert_eq!(snapshot.error, Some(AccountError::Cancelled));
     assert_eq!(deckcraft_ui_egui::account::error_text(AccountError::Cancelled), None, "shown as nothing");
-    assert_eq!(server.requests().iter().filter(|r| r.path == "/token").count(), 0);
+    assert_eq!(server.requests().iter().filter(|r| r.path == "/id/token").count(), 0);
 }
 
 #[test]
@@ -257,4 +280,43 @@ fn cancel_before_the_worker_starts_signing_in_is_silent() {
     hook.cancel_sign_in();
     let snapshot = wait_for(&hook, "the cancelled sign-in", |s| s.view == AccountView::Guest);
     assert_eq!(snapshot.error, Some(AccountError::Cancelled));
+}
+
+#[test]
+fn an_organization_switch_waits_for_the_browser_and_cancel_keeps_the_context() {
+    let server = Server::start(Scenario::default());
+    let dir = tempfile::tempdir().unwrap();
+    let browser_returns = Arc::new(AtomicBool::new(true));
+    let returns = browser_returns.clone();
+    let hook = started(&server, &dir, Box::new(move |url: &str| if returns.load(Ordering::SeqCst) { follow_redirect(url) } else { Ok(()) }));
+    hook.sign_in();
+    wait_for(&hook, "sign-in", |s| matches!(&s.view, AccountView::SignedIn(v) if v.orgs.len() == 2));
+    let tokens = || server.requests().iter().filter(|r| r.path == "/id/token").count();
+    let signed_in_tokens = tokens();
+
+    // A browser that never comes back: the switch keeps waiting, shown as the sign-in wait.
+    browser_returns.store(false, Ordering::SeqCst);
+    hook.select_org(Some(ORG_B.into()));
+    assert_eq!(hook.snapshot().view, AccountView::SigningIn, "shown at once");
+    std::thread::sleep(Duration::from_millis(300));
+    let waiting = hook.snapshot();
+    assert!(waiting.view == AccountView::SigningIn && waiting.busy, "still waiting: {waiting:?}");
+    hook.cancel_sign_in();
+    let snapshot = wait_for(&hook, "the cancelled switch", |s| matches!(s.view, AccountView::SignedIn(_)));
+    assert_eq!(snapshot.error, Some(AccountError::Cancelled));
+    let AccountView::SignedIn(view) = snapshot.view else { panic!("signed in") };
+    assert_eq!(view.active_org, None, "a cancelled switch keeps the context");
+
+    // Cancel before the worker reaches the browser is silent too.
+    hook.select_org(Some(ORG_A.into()));
+    hook.cancel_sign_in();
+    let snapshot = wait_for(&hook, "the switch cancelled at once", |s| matches!(s.view, AccountView::SignedIn(_)));
+    assert_eq!(snapshot.error, Some(AccountError::Cancelled));
+    assert_eq!(tokens(), signed_in_tokens, "no cancelled switch exchanged a code");
+
+    // A later switch is not held back by the earlier Cancel.
+    browser_returns.store(true, Ordering::SeqCst);
+    hook.select_org(Some(ORG_B.into()));
+    let snapshot = wait_for(&hook, "org switch", |s| matches!(&s.view, AccountView::SignedIn(v) if v.active_org.as_deref() == Some(ORG_B)));
+    assert_eq!(snapshot.error, None);
 }

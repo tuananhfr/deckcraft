@@ -44,6 +44,8 @@ pub fn install() -> Option<DesktopAccount> {
     let issuer = ISSUER.map(str::trim).filter(|issuer| !issuer.is_empty())?;
     let mut config = Config::new(issuer, Product::TrinhChieu, env!("CARGO_PKG_VERSION"));
     config.api_base = API_BASE.map(str::trim).filter(|base| !base.is_empty()).map(Into::into);
+    // PI has no Office product: device activation and leases stay off (ADR 0011).
+    config.offline_licensing = false;
     DesktopAccount::new(config, Arc::new(OsSecretStore::new()), Box::new(open_browser))
 }
 
@@ -72,9 +74,10 @@ struct Shared {
     account: OnceLock<Arc<Account>>,
     /// User commands queued or running (the page shows them as busy).
     pending: AtomicUsize,
-    /// From the click until `sign_in` returns, so a publish in between never shows the guest page.
-    signing_in: AtomicBool,
-    /// Cancel pressed before the library started waiting; `sign_in` resets the library's own flag.
+    /// From the click until `sign_in` or `select_org` returns (both wait for the browser), so a
+    /// publish in between never shows the page the wait started from.
+    in_browser: AtomicBool,
+    /// Cancel pressed before the library started waiting; each browser wait resets the library's own flag.
     cancelled: AtomicBool,
     /// The last user command's error; a new command clears it at once.
     error: Mutex<Option<AccountError>>,
@@ -95,7 +98,7 @@ impl Shared {
     /// Every later command gets the same answer, instead of leaving the page waiting.
     fn unavailable(&self) {
         self.pending.store(0, Ordering::SeqCst);
-        self.signing_in.store(false, Ordering::SeqCst);
+        self.in_browser.store(false, Ordering::SeqCst);
         *lock(&self.snapshot) = AccountSnapshot { error: Some(AccountError::Other), ..AccountSnapshot::default() };
         self.repaint();
     }
@@ -135,13 +138,20 @@ impl DesktopAccount {
             let mut snapshot = lock(&shared.snapshot);
             snapshot.busy = true;
             snapshot.error = None;
-            if shared.signing_in.load(Ordering::SeqCst) {
+            if shared.in_browser.load(Ordering::SeqCst) {
                 snapshot.view = AccountView::SigningIn;
             }
         }
         if self.commands.send(command).is_err() {
             shared.unavailable();
         }
+    }
+
+    /// Queues a command that waits for the browser, shown as the sign-in wait with its Cancel.
+    fn start_in_browser(&self, command: Command) {
+        self.shared.cancelled.store(false, Ordering::SeqCst);
+        self.shared.in_browser.store(true, Ordering::SeqCst);
+        self.send(command);
     }
 }
 
@@ -151,13 +161,11 @@ impl AccountHook for DesktopAccount {
     }
 
     fn sign_in(&self) {
-        self.shared.cancelled.store(false, Ordering::SeqCst);
-        self.shared.signing_in.store(true, Ordering::SeqCst);
-        self.send(Command::SignIn);
+        self.start_in_browser(Command::SignIn);
     }
 
     fn cancel_sign_in(&self) {
-        // Not queued: the worker is blocked inside `sign_in` until this unblocks it.
+        // Not queued: the worker is blocked inside `sign_in` or `select_org` until this unblocks it.
         self.shared.cancelled.store(true, Ordering::SeqCst);
         if let Some(account) = self.shared.account.get() {
             account.cancel_sign_in();
@@ -169,7 +177,8 @@ impl AccountHook for DesktopAccount {
     }
 
     fn select_org(&self, org_id: Option<String>) {
-        self.send(Command::SelectOrg(org_id));
+        // PI switches organization only through a new browser authorization (ADR 0011).
+        self.start_in_browser(Command::SelectOrg(org_id));
     }
 
     fn retry_activation(&self) {
@@ -300,9 +309,9 @@ impl Worker {
 
     fn handle(&mut self, command: Command) {
         let result = match command {
-            Command::SignIn => self.sign_in(),
+            Command::SignIn => self.through_browser(|account, open| account.sign_in(open)),
             Command::SignOut => self.account.sign_out(),
-            Command::SelectOrg(org) => self.account.select_org(org.as_deref()),
+            Command::SelectOrg(org) => self.through_browser(|account, open| account.select_org(org.as_deref(), open)),
             Command::RetryActivation => self.account.retry_activation(),
             Command::WarningShown(_) | Command::Refresh => Ok(()),
         };
@@ -315,16 +324,17 @@ impl Worker {
         }
     }
 
-    fn sign_in(&self) -> Result<(), Error> {
+    fn through_browser(&self, run: impl FnOnce(&Account, &dyn Fn(&str) -> Result<(), String>) -> Result<(), Error>) -> Result<(), Error> {
         let (shared, account, opener) = (&self.shared, &self.account, &self.opener);
-        let result = account.sign_in(|url| {
+        let open = |url: &str| {
             if shared.cancelled.load(Ordering::SeqCst) {
                 account.cancel_sign_in();
                 return Ok(());
             }
             opener(url)
-        });
-        shared.signing_in.store(false, Ordering::SeqCst);
+        };
+        let result = run(account, &open);
+        shared.in_browser.store(false, Ordering::SeqCst);
         match result {
             // A browser that failed to open after Cancel is still a cancel, not an error to show.
             Err(Error::Browser(_)) if shared.cancelled.load(Ordering::SeqCst) => Err(Error::Cancelled),
@@ -338,7 +348,7 @@ impl Worker {
         {
             // The flags are read under the lock, so a click's optimistic state is never replaced by an older view.
             let mut snapshot = lock(&shared.snapshot);
-            let view = if shared.signing_in.load(Ordering::SeqCst) { AccountView::SigningIn } else { view };
+            let view = if shared.in_browser.load(Ordering::SeqCst) { AccountView::SigningIn } else { view };
             *snapshot = AccountSnapshot { view, busy: shared.pending.load(Ordering::SeqCst) > 0, error: *lock(&shared.error) };
         }
         shared.repaint();
@@ -379,6 +389,8 @@ fn licence_of(licence: &LicenceState) -> LicenceView {
         LicenceState::Inactive { expires_at, .. } => LicenceView::Inactive { expires_at: *expires_at },
         LicenceState::DeviceRevoked => LicenceView::DeviceRevoked,
         LicenceState::DeviceCapReached => LicenceView::DeviceCapReached,
+        // The organization has no paid plan for this product: free features are all there is.
+        LicenceState::NotEntitled => LicenceView::Free,
         LicenceState::SessionOnly => LicenceView::SessionOnly,
     }
 }
