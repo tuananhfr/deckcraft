@@ -25,6 +25,9 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
     });
 }
 
+/// Panes that only change the presentation; not offered read-only.
+pub(crate) const EDITING_PANES: &[&str] = &["format", "background", "animation", "designer"];
+
 fn contents(app: &mut SlideApp, ui: &mut Ui, pane: &str) {
     let t = Tokens::get(ui.ctx());
     let title = match pane {
@@ -50,14 +53,18 @@ fn contents(app: &mut SlideApp, ui: &mut Ui, pane: &str) {
         });
     });
     ui.add_space(6.0);
-    egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| match pane {
-        "format" => format_shape(app, ui),
-        "background" => background(app, ui),
-        "animation" => animation(app, ui),
-        "selection" => crate::selpane::show(app, ui),
-        "comments" => comments(app, ui),
-        "designer" => designer(app, ui),
-        _ => {}
+    // Read-only, a pane that only changes the presentation shows greyed out (it still scrolls).
+    let enabled = app.editable() || !EDITING_PANES.contains(&pane);
+    egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+        ui.add_enabled_ui(enabled, |ui| match pane {
+            "format" => format_shape(app, ui),
+            "background" => background(app, ui),
+            "animation" => animation(app, ui),
+            "selection" => crate::selpane::show(app, ui),
+            "comments" => comments(app, ui),
+            "designer" => designer(app, ui),
+            _ => {}
+        })
     });
 }
 
@@ -182,6 +189,9 @@ fn format_shape(app: &mut SlideApp, ui: &mut Ui) {
             let id = ui.id().with(("alt", sh.id.0));
             let mut alt: String = ui.data_mut(|d| d.get_temp(id).unwrap_or_else(|| sh.descr.clone()));
             let r = ui.add(egui::TextEdit::multiline(&mut alt).desired_rows(3).desired_width(f32::INFINITY));
+            if r.has_focus() && alt != sh.descr {
+                app.track_inline_edit("shape.altText", json!({"text": alt}));
+            }
             if r.lost_focus() && alt != sh.descr {
                 run(app, "shape.altText", json!({"text": alt}));
             }
@@ -561,7 +571,9 @@ fn animation(app: &mut SlideApp, ui: &mut Ui) {
 
 fn comments(app: &mut SlideApp, ui: &mut Ui) {
     let t = Tokens::get(ui.ctx());
-    if ui.button(crate::tl!("+ New Comment")).clicked() {
+    // The file's comments are its content: read-only, they can be read but not added to or changed.
+    let editable = app.editable();
+    if editable && ui.button(crate::tl!("+ New Comment")).clicked() {
         app.dialog = Some(crate::dialogs::Dialog::new("comment"));
     }
     ui.separator();
@@ -585,6 +597,9 @@ fn comments(app: &mut SlideApp, ui: &mut Ui) {
             ui.label(&c.text);
             for r in &c.replies {
                 ui.label(egui::RichText::new(format!("↳ {}: {}", r.author, r.text)).color(t.text_dim));
+            }
+            if !editable {
+                return;
             }
             ui.horizontal(|ui| {
                 let id = ui.id().with(("reply", i));

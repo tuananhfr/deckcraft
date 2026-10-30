@@ -265,6 +265,21 @@ pub fn notes_pane(app: &mut SlideApp, ui: &mut Ui) {
                 .line_segment([pos2(rect.min.x - 8.0, rect.min.y - 6.0), pos2(rect.max.x + 8.0, rect.min.y - 6.0)], Stroke::new(1.0, t.separator));
             // Keep a local buffer per slide; commit when it changes and the field loses focus.
             let id = egui::Id::new("notes_edit");
+            if !app.editable() {
+                // Read-only notes can be read, and selected to copy when downloading is allowed.
+                let mut shown = current.as_str();
+                ui.add(
+                    egui::TextEdit::multiline(&mut shown)
+                        .id(id)
+                        .frame(egui::Frame::NONE)
+                        .desired_width(f32::INFINITY)
+                        .desired_rows(2)
+                        .font(theme::font(13.0))
+                        .interactive(app.can_download()),
+                );
+                app.notes_buf = (uid, idx, current.clone());
+                return;
+            }
             let focused = ui.ctx().memory(|m| m.has_focus(id));
             // Focus can leave in the frame before the field is drawn (Escape, a click on a
             // thumbnail): what was typed is still committed, to the slide it was typed for.
@@ -290,6 +305,9 @@ pub fn notes_pane(app: &mut SlideApp, ui: &mut Ui) {
                     .font(theme::font(13.0)),
             );
             app.notes_buf.2 = buf.clone();
+            if r.has_focus() && buf != current {
+                app.track_inline_edit("slide.notes", json!({"text": buf, "index": idx}));
+            }
             if r.lost_focus() && buf != current {
                 let _ = app.run("slide.notes", json!({"text": buf, "index": idx}));
             }

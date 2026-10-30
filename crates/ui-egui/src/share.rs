@@ -6,13 +6,16 @@ use crate::{SlideApp, loss_warning::Action};
 impl SlideApp {
     /// Share… is offered only by hosts with a share sheet, and only over a presentation.
     pub fn can_share(&self) -> bool {
-        self.services.share.is_some() && self.session.active().is_some()
+        self.services.share.is_some() && self.session.active().is_some() && self.can_download()
     }
 
     /// Shares the active presentation in the format Save As would write. Only a pointer click
     /// (`pointer_click`) runs inside the browser event that lets a page open the share sheet;
     /// from a key or a command the copy downloads instead.
     pub fn share_presentation(&mut self, pointer_click: bool) {
+        if !self.may_download() {
+            return;
+        }
         let ext = if self.default_save_format() == "pptx" { "pptx" } else { "deckcraft" };
         if self.warn_save_losses(ext, Action::Share) {
             return;

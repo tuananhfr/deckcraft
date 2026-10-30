@@ -5,8 +5,8 @@
 use std::path::{Path, PathBuf};
 
 const MACROS: [&str; 5] = ["error!(", "warn!(", "info!(", "debug!(", "trace!("];
-/// Identifiers that hold a document's name, path or URL in this code base.
-const SUSPECT: [&str; 12] = ["name", "path", "url", "uri", "href", "title", "file", "filename", "file_name", "f", "p", "dir"];
+/// Identifiers that hold a document's name, path, URL or server id in this code base.
+const SUSPECT: [&str; 13] = ["name", "path", "url", "uri", "href", "title", "file", "filename", "file_name", "f", "p", "dir", "doc_id"];
 /// Error values: a record that names a document (`log_name`) may be quoting it in its error too.
 const ERRORS: [&str; 4] = ["e", "err", "error", "detail"];
 /// Wrapping a value in one of these makes it safe to log.

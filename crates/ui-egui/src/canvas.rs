@@ -138,7 +138,8 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
         Some((Target::Slides, d)) => {
             let idx = d.selection.slide;
             let doc = d.doc.clone();
-            app.textures.slide(ui.ctx(), &doc, idx, px, visible, true, crate::media::gif_key(&gifs), app.ui.grayscale, &times)
+            let prompts = placeholder_prompts(app);
+            app.textures.slide(ui.ctx(), &doc, idx, px, visible, prompts, crate::media::gif_key(&gifs), app.ui.grayscale, &times)
         }
         Some((Target::Master { master }, d)) => master_tex(ui.ctx(), &d.doc, master, None, px, visible),
         Some((Target::Layout { master, layout }, d)) => master_tex(ui.ctx(), &d.doc, master, Some(layout), px, visible),
@@ -209,6 +210,9 @@ fn visible_region(avail: Rect, slide: Rect, pixel: egui::Vec2) -> deckcraft_rend
 /// editing text, or over the one selected shape (typing on it starts editing). `None` when there is
 /// nothing to type into.
 pub fn ime_area(app: &SlideApp, xf: Xf) -> Option<Rect> {
+    if !app.editable() {
+        return None;
+    }
     let st = app.session.active()?;
     if let Some(ts) = &st.selection.text {
         if ts.notes {
@@ -321,6 +325,12 @@ fn media_bar(app: &mut SlideApp, ui: &mut Ui, xf: Xf) {
         }
         None => {}
     }
+}
+
+/// Empty placeholders show their prompt and dashed outline only where they can be typed into; a
+/// read-only slide looks as in the show, as PowerPoint's Reading view does. The file is unchanged.
+pub(crate) fn placeholder_prompts(app: &SlideApp) -> bool {
+    app.editable()
 }
 
 fn master_tex(
@@ -555,6 +565,7 @@ fn poly(p: &egui::Painter, pts: [Pos2; 4], stroke: Stroke) {
 }
 
 fn overlays(app: &mut SlideApp, ui: &Ui, painter: &egui::Painter, xf: Xf, t: &Tokens) {
+    let (editable, can_copy) = (app.editable(), app.can_download());
     let Some(st) = app.session.active() else { return };
     let sel_stroke = Stroke::new(1.0, t.selection);
     let editing = st.selection.text.clone();
@@ -563,6 +574,15 @@ fn overlays(app: &mut SlideApp, ui: &Ui, painter: &egui::Painter, xf: Xf, t: &To
         let x = deckcraft_engine::cmd::xfrm_of(&st.doc, &st.selection, sh);
         let a = x.affine();
         let corners = [Point::new(0.0, 0.0), Point::new(x.w, 0.0), Point::new(x.w, x.h), Point::new(0.0, x.h)].map(|q| xf.to_screen(a * q));
+        if !editable {
+            // Read-only: no handles, only an outline of what Copy would take.
+            if can_copy && sh.is_line() {
+                painter.line_segment([xf.to_screen(a * Point::new(0.0, 0.0)), xf.to_screen(a * Point::new(x.w, x.h))], sel_stroke);
+            } else if can_copy {
+                poly(painter, corners, sel_stroke);
+            }
+            continue;
+        }
         if sh.is_line() {
             let (p0, p1) = (xf.to_screen(a * Point::new(0.0, 0.0)), xf.to_screen(a * Point::new(x.w, x.h)));
             let glued = match sh.kind {
@@ -631,7 +651,8 @@ fn overlays(app: &mut SlideApp, ui: &Ui, painter: &egui::Painter, xf: Xf, t: &To
         for (a, b, thick) in deckcraft_engine::cmd::text::composition_underlines(st) {
             painter.line_segment([xf.to_screen(a), xf.to_screen(b)], Stroke::new(if thick { 2.0 } else { 1.0 }, t.caret));
         }
-        if !ts.is_range() {
+        // Read-only text is only ever selected by Find: no caret to type at.
+        if !ts.is_range() && editable {
             let blink = (ui.input(|i| i.time) * 1.6).fract() < 0.6;
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(300));
             // An empty placeholder shows the caret where typing begins too.
@@ -745,8 +766,20 @@ fn draw_preview(app: &SlideApp, p: &egui::Painter, xf: Xf, x: Xfrm, t: &Tokens) 
     crate::ribbon::paint_preset(p, r, &preset, t.accent.gamma_multiply(0.25), t.accent);
 }
 
+/// A read-only presentation's context menu: Copy is all it offers (greyed out without download).
+pub(crate) fn copy_only_menu(app: &mut SlideApp, ui: &mut egui::Ui, params: serde_json::Value) {
+    if ui.add_enabled(crate::ribbon::enabled(app, "edit.copy"), egui::Button::new(crate::tl!("Copy"))).clicked() {
+        let _ = app.run("edit.copy", params);
+        ui.close();
+    }
+}
+
 fn context_menu(app: &mut SlideApp, resp: &egui::Response) {
     resp.context_menu(|ui| {
+        if !app.editable() {
+            copy_only_menu(app, ui, json!({}));
+            return;
+        }
         let has_sel = app.session.active().is_some_and(|d| !d.selection.shapes.is_empty());
         for (l, id) in [("Cut", "edit.cut"), ("Copy", "edit.copy"), ("Paste", "edit.paste")] {
             if ui.add_enabled(crate::ribbon::enabled(app, id), egui::Button::new(crate::tl!(l))).clicked() {

@@ -59,7 +59,7 @@ fn now() -> String {
 
 fn add(s: &mut Session, p: &Value) -> Result<Value> {
     let text = str_param(p, "text").ok_or_else(|| bad("comment.add", "missing `text`"))?.to_string();
-    let author = s.prefs.author.clone();
+    let author = s.author();
     let shape = id_param(p, "id").or_else(|| s.active().and_then(|d| d.selection.shapes.first().copied()));
     let (x, y) = (f64_or(p, "x", 10.0), f64_or(p, "y", 10.0));
     s.edit(|doc, sel| {
@@ -73,7 +73,7 @@ fn add(s: &mut Session, p: &Value) -> Result<Value> {
 fn reply(s: &mut Session, p: &Value) -> Result<Value> {
     let i = usize_param(p, "index").ok_or_else(|| bad("comment.reply", "missing `index`"))?;
     let text = str_param(p, "text").unwrap_or("").to_string();
-    let author = s.prefs.author.clone();
+    let author = s.author();
     s.edit(|doc, sel| {
         let sl = Arc::make_mut(doc.slides.get_mut(sel.slide).ok_or_else(|| bad("comment.reply", "no slide"))?);
         let c = sl.comments.get_mut(i).ok_or_else(|| bad("comment.reply", "no such comment"))?;

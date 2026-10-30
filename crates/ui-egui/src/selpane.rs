@@ -194,8 +194,13 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
                     run(app, "shape.rename", json!({"id": row.id, "name": buf.trim()}));
                 }
                 ui.memory_mut(|m| m.request_focus(row_id(row.id)));
-            } else if let Some((_, s)) = app.selpane.renaming.as_mut() {
-                *s = buf;
+            } else {
+                if out.has_focus() && buf.trim() != row.name && !buf.trim().is_empty() {
+                    app.track_inline_edit("shape.rename", json!({"id": row.id, "name": buf.trim()}));
+                }
+                if let Some((_, s)) = app.selpane.renaming.as_mut() {
+                    *s = buf;
+                }
             }
         } else {
             let color = if row.dimmed { t.text_faint } else { t.text };

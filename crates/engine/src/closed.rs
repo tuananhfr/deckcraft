@@ -41,9 +41,10 @@ impl ClosedDocs {
     }
 
     /// Keeps `d` as it is now. An untouched placeholder loses nothing by closing and isn't kept;
-    /// neither is one that can't be written or is larger than the whole allowance.
+    /// neither is one that can't be written, is larger than the whole allowance or isn't
+    /// [`reopenable`](DocState::reopenable).
     pub fn record(&mut self, d: &DocState) {
-        if d.is_untouched_placeholder() {
+        if d.is_untouched_placeholder() || !d.reopenable {
             return;
         }
         match deckcraft_format::save(&d.doc) {
@@ -110,6 +111,19 @@ mod tests {
         assert_eq!(c.last().unwrap().title, "p11");
         assert_eq!(c.pop().unwrap().title, "p11");
         assert_eq!(c.last().unwrap().title, "p10");
+    }
+
+    #[test]
+    fn a_document_that_is_not_reopenable_is_not_kept() {
+        let session = crate::Session::with_new();
+        let mut d = session.active().unwrap().clone();
+        d.doc = std::sync::Arc::new((*d.doc).clone());
+        let mut c = ClosedDocs::default();
+        c.record(&d);
+        assert_eq!(c.len(), 1);
+        d.reopenable = false;
+        c.record(&d);
+        assert_eq!(c.len(), 1);
     }
 
     #[test]

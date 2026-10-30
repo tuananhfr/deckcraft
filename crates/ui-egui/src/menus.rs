@@ -62,8 +62,11 @@ pub fn ui_shortcut(app: &mut SlideApp, key: egui::Key, m: Mods) -> bool {
             if app.session.active().is_none() {
                 return false;
             }
-            app.open_backstage(crate::backstage::Page::Print);
+            if app.may_download() {
+                app.open_backstage(crate::backstage::Page::Print);
+            }
         }
+        "insert.hyperlink" if !app.editable() => app.note_access(deckcraft_engine::access::READ_ONLY),
         "insert.hyperlink" => app.dialog = Some(crate::dialogs::Dialog::new("hyperlink")),
         _ => {
             let _ = app.run(id, json!({}));

@@ -7,6 +7,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+pub mod access;
 mod clipboard_html;
 mod clipboard_marker;
 mod clipboard_media;
@@ -24,6 +25,7 @@ pub mod links;
 pub mod log_safe;
 mod paste_inherit;
 pub mod recovery;
+mod reload;
 mod rich_paste;
 pub mod sample;
 pub mod save_losses;
@@ -36,6 +38,7 @@ use deckcraft_model::{Presentation, Shape, ShapeId, Slide, SlideId};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+pub use access::Access;
 pub use cmd::{CommandInfo, CommandSpec, command_specs, find_command};
 pub use deckcraft_geom as geom;
 pub use deckcraft_media as media;
@@ -233,6 +236,11 @@ pub struct DocState {
     /// Opened by the app, not the user (the built-in sample, the web build's blank start
     /// presentation): untouched, it gives way to the next one ([`Session::add_document`]).
     pub placeholder: bool,
+    /// Kept for `file.reopenClosed` once closed; off for a document a host keeps (the office
+    /// site's online documents), which would reopen as a local copy.
+    pub reopenable: bool,
+    /// What the host allows ([`Session::set_access`]); everything for a local presentation.
+    pub access: Access,
 }
 
 static NEXT_UID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
@@ -258,6 +266,8 @@ impl DocState {
             save_as_pptx,
             composition: None,
             placeholder: false,
+            reopenable: true,
+            access: Access::default(),
         }
     }
     pub fn is_dirty(&self) -> bool {
@@ -424,6 +434,9 @@ pub struct Session {
     pub mac_keys: bool,
     /// Presentations closed in this session, for `file.reopenClosed`.
     pub closed: closed::ClosedDocs,
+    /// The signed-in account's name, which a host gives (the office site's PI account). It names
+    /// new comments instead of `prefs.author` and is never saved with the preferences.
+    pub host_author: Option<String>,
 }
 
 impl Default for Session {
@@ -453,7 +466,12 @@ impl Session {
             gif_paused: Default::default(),
             mac_keys: cfg!(target_os = "macos"),
             closed: Default::default(),
+            host_author: None,
         }
+    }
+    /// Who new comments are by: the host's account, else the preference.
+    pub fn author(&self) -> String {
+        self.host_author.clone().unwrap_or_else(|| self.prefs.author.clone())
     }
     /// A session with one new presentation open.
     pub fn with_new() -> Self {
@@ -472,6 +490,9 @@ impl Session {
     }
     pub fn active_mut(&mut self) -> Option<&mut DocState> {
         self.active.and_then(|i| self.docs.get_mut(i))
+    }
+    pub fn document_mut(&mut self, uid: u64) -> Option<&mut DocState> {
+        self.docs.iter_mut().find(|d| d.uid == uid)
     }
     pub fn doc(&self) -> Result<&DocState> {
         self.active().ok_or(EngineError::NoDocument)
@@ -535,6 +556,9 @@ impl Session {
 
     fn execute_unguarded(&mut self, id: &str, params: &Value) -> Result<Value> {
         let spec = find_command(id).ok_or_else(|| EngineError::UnknownCommand(id.into()))?;
+        if let Some(why) = self.active().and_then(|d| access::refusal(d.access, spec)) {
+            return Err(EngineError::Disabled(id.into(), why.into()));
+        }
         // Any other edit (or a click, a key, undo) settles an input method's composition first.
         if self.depth == 0 && (spec.journal || spec.undoable) && !matches!(id, "text.compose" | "text.commit" | "text.deleteSurrounding") {
             self.end_composition();
@@ -550,6 +574,11 @@ impl Session {
         self.depth += 1;
         let r = (spec.run)(self, params);
         self.depth -= 1;
+        if let Some((uid, old, sel)) = &before
+            && self.undo_read_only_change(*uid, old, sel)
+        {
+            return Err(EngineError::Disabled(id.into(), access::READ_ONLY.into()));
+        }
         let r = r?;
         if let Some(st) = self.active_mut() {
             clamp_selection(st);
@@ -581,9 +610,13 @@ impl Session {
         command_specs().iter().map(|c| c.info(self)).collect()
     }
 
-    /// Mutate the active presentation (copy-on-write) and bump the revision.
+    /// Mutate the active presentation (copy-on-write) and bump the revision. Refused on a
+    /// read-only one ([`Access`]).
     pub fn edit<T>(&mut self, f: impl FnOnce(&mut Presentation, &mut Selection) -> Result<T>) -> Result<T> {
         let st = self.doc_mut()?;
+        if !st.access.editable {
+            return Err(EngineError::Disabled("edit".into(), access::READ_ONLY.into()));
+        }
         let mut doc = (*st.doc).clone();
         let mut sel = st.selection.clone();
         let r = f(&mut doc, &mut sel)?;

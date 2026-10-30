@@ -198,6 +198,8 @@ impl SlideApp {
         self.session
             .documents()
             .iter()
+            // The host keeps its own documents' unsaved bytes, so a reload can't offer an old draft over them.
+            .filter(|d| !self.host_owns(d.uid))
             .map(|d| DocInput {
                 uid: d.uid,
                 doc: d.doc.clone(),

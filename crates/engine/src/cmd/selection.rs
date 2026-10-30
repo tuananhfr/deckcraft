@@ -59,7 +59,8 @@ fn select(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
     let reveal: Vec<ShapeId> = next.iter().copied().filter(|i| valid.contains(i) && st.shape(*i).is_some_and(|x| x.hidden)).collect();
-    if reveal.is_empty() {
+    // Read-only, a hidden object is still picked from the list, just not shown.
+    if reveal.is_empty() || !s.editable() {
         s.select(|_, sel| {
             sel.text = None;
             sel.cells = None;

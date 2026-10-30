@@ -113,7 +113,8 @@ impl Session {
                 "down" => Some((0.0, step)),
                 _ => None,
             };
-            if let Some((dx, dy)) = d {
+            // Read-only: arrows don't nudge, and say nothing as they move nothing.
+            if let Some((dx, dy)) = d.filter(|_| self.editable()) {
                 self.execute("shape.move", &json!({"dx": dx, "dy": dy}))?;
                 return Ok(json!({"handled": true}));
             }
@@ -227,6 +228,9 @@ impl Session {
     /// Type text: into the text being edited, or (a shape selected) start editing it.
     pub fn type_text(&mut self, text: &str) -> Result<Value> {
         let st = self.doc()?;
+        if !st.access.editable {
+            return Ok(json!({"handled": false}));
+        }
         if st.composition.as_ref().is_some_and(|c| c.deleted && c.len == 0) {
             // The text an input method just took back is replaced in the same undo step.
             return self.commit_text(text);
@@ -241,7 +245,7 @@ impl Session {
     /// one starts editing its text and replaces it, as typing does ([`Session::type_text`]).
     /// `active` is the part being converted, in characters of `text`.
     pub fn compose_text(&mut self, text: &str, active: Option<(usize, usize)>) -> Result<Value> {
-        if !self.start_typing(text)? {
+        if !self.editable() || !self.start_typing(text)? {
             return Ok(json!({"handled": false}));
         }
         let mut p = json!({"text": text});
@@ -253,7 +257,7 @@ impl Session {
 
     /// An input method's result (#101): replaces the composition as one undo step.
     pub fn commit_text(&mut self, text: &str) -> Result<Value> {
-        if !self.start_typing(text)? {
+        if !self.editable() || !self.start_typing(text)? {
             return Ok(json!({"handled": false}));
         }
         self.execute("text.commit", &json!({"text": text}))
@@ -262,7 +266,7 @@ impl Session {
     /// An input method takes back `before` characters before the insertion point and `after`
     /// after it (`text.deleteSurrounding`). Nothing happens when no text is being edited.
     pub fn delete_surrounding(&mut self, before: usize, after: usize) -> Result<Value> {
-        if !self.active().is_some_and(|d| d.selection.text.is_some()) {
+        if !self.editable() || !self.active().is_some_and(|d| d.selection.text.is_some()) {
             return Ok(json!({"handled": false}));
         }
         self.execute("text.deleteSurrounding", &json!({"before": before, "after": after}))

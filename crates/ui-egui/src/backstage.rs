@@ -142,6 +142,23 @@ pub fn entries(has_doc: bool, share: bool) -> (Vec<Nav>, Vec<Nav>) {
     (top, vec![Nav::Page(Page::Account), Nav::Options])
 }
 
+/// The side menu for the active presentation's access: no Save when it can't be changed, no
+/// Save As, Print or Export when its content may not leave the app.
+pub(crate) fn offered_entries(app: &SlideApp, has_doc: bool) -> (Vec<Nav>, Vec<Nav>) {
+    let (mut top, bottom) = entries(has_doc, app.can_share());
+    top.retain(|nav| match nav {
+        Nav::Save => app.editable(),
+        Nav::Page(page) => offered(app, *page),
+        _ => true,
+    });
+    (top, bottom)
+}
+
+/// `page` can be shown for the active presentation.
+pub(crate) fn offered(app: &SlideApp, page: Page) -> bool {
+    !matches!(page, Page::SaveAs | Page::Print | Page::Export) || app.can_download()
+}
+
 /// Print page: which slides.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PrintScope {
@@ -288,7 +305,7 @@ pub fn key(app: &mut SlideApp, key: Key, mods: deckcraft_engine::Mods) -> bool {
         return false;
     }
     let has_doc = app.session.active().is_some();
-    let (top, bottom) = entries(has_doc, app.can_share());
+    let (top, bottom) = offered_entries(app, has_doc);
     let all: Vec<Nav> = top.into_iter().chain(bottom).collect();
     let Some(bs) = app.backstage.as_mut() else { return false };
     match key {
@@ -335,9 +352,13 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
     if !has_doc && bs.page.needs_doc() {
         bs.page = Page::Home;
     }
+    // Downloading was turned off while the page was open.
+    if !offered(app, bs.page) {
+        bs.page = Page::Info;
+    }
     let (nav_bg, page_bg) = colours(&t);
     let mut out = Outcome::default();
-    let (top, bottom) = entries(has_doc, app.can_share());
+    let (top, bottom) = offered_entries(app, has_doc);
     egui::Panel::left("backstage_nav").exact_size(NAV_W).resizable(false).frame(egui::Frame::NONE.fill(nav_bg)).show(ui, |ui| {
         ui.spacing_mut().item_spacing.y = 0.0;
         if has_doc {
@@ -838,10 +859,13 @@ fn info(app: &mut SlideApp, ui: &mut Ui, bs: &mut Backstage) {
                         draft.clone_from(&saved);
                     }
                     let resp = ui.add(egui::TextEdit::singleline(draft).id(id).hint_text(crate::tl!(*hint)).desired_width(300.0)).labelled_by(l.id);
-                    if resp.lost_focus() && *draft != saved {
-                        let mut p = serde_json::Map::new();
-                        p.insert((*key).to_string(), json!(draft.clone()));
-                        let _ = app.run("file.properties", Value::Object(p));
+                    let typed = (*draft != saved).then(|| json!({ *key: draft.clone() }));
+                    if let Some(p) = typed {
+                        if resp.lost_focus() {
+                            let _ = app.run("file.properties", p);
+                        } else if resp.has_focus() {
+                            app.track_inline_edit("file.properties", p);
+                        }
                     }
                     ui.end_row();
                 }

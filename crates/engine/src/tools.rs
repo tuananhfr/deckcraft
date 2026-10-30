@@ -206,14 +206,29 @@ pub fn box_handles(x: &Xfrm) -> ([Point; 8], Point) {
 
 impl Session {
     pub fn set_tool(&mut self, kind: ToolKind) {
+        // Drawing tools insert shapes, which a read-only presentation refuses.
+        let kind = if self.editable() { kind } else { ToolKind::Select };
         self.tool.kind = kind;
         self.tool.drag = None;
         self.tool.preview = None;
         self.tool.marquee = None;
     }
 
-    /// What's under `p` on the current slide.
+    /// What's under `p` on the current slide. A read-only presentation's handles and text are just
+    /// its shapes: a click selects, never sizes, rotates, reshapes or places a caret.
     pub fn hit_test(&self, p: Point, tol: f64) -> Option<Hit> {
+        let hit = self.hit_test_any(p, tol);
+        if self.editable() {
+            return hit;
+        }
+        hit.map(|h| match h {
+            Hit::Resize { id, .. } | Hit::Rotate { id } | Hit::Adjust { id, .. } | Hit::LineEnd { id, .. } | Hit::Shape { id, .. } => {
+                Hit::Shape { id, text: false }
+            }
+        })
+    }
+
+    fn hit_test_any(&self, p: Point, tol: f64) -> Option<Hit> {
         let st = self.active()?;
         // Handles of selected shapes first.
         if st.selection.text.is_none() || st.selection.shapes.len() == 1 {
@@ -273,6 +288,9 @@ impl Session {
         // A press (not a hover) settles an input method's composition, as clicking does in PowerPoint.
         if !matches!(ev.kind, PointerKind::Move) {
             self.end_composition();
+        }
+        if !self.editable() && !matches!(self.tool.kind, ToolKind::Select) {
+            self.tool = ToolState::default();
         }
         match ev.kind {
             PointerKind::Move => {
@@ -428,9 +446,12 @@ impl Session {
                 } else {
                     vec![id]
                 };
-                // Locked objects stay put when the selection is dragged.
-                let origs: Vec<(ShapeId, Xfrm)> =
-                    ids.iter().filter_map(|i| st.shape(*i).filter(|s| !s.locked).map(|s| (*i, xfrm_of(&st.doc, &st.selection, s)))).collect();
+                // Locked objects stay put when the selection is dragged, and so does everything read-only.
+                let origs: Vec<(ShapeId, Xfrm)> = ids
+                    .iter()
+                    .filter(|_| st.access.editable)
+                    .filter_map(|i| st.shape(*i).filter(|s| !s.locked).map(|s| (*i, xfrm_of(&st.doc, &st.selection, s))))
+                    .collect();
                 // A click (no drag) on text puts the caret there; unselected text boxes and
                 // placeholders take the caret straight away like PowerPoint.
                 let enter_text = (text && !toggle && (selected || is_text_first(st, id))).then_some((id, p));
@@ -790,6 +811,10 @@ impl Session {
         if !matches!(self.tool.kind, ToolKind::Select) {
             // Double-click while drawing: lock drawing mode off.
             self.tool.sticky = false;
+            return Ok(Value::Null);
+        }
+        // It would only start typing or open the Format pane.
+        if !self.editable() {
             return Ok(Value::Null);
         }
         let st = self.doc()?;
