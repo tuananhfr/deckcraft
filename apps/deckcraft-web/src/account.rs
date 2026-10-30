@@ -6,7 +6,7 @@
 //!
 //! The shell's snapshots are read as JSON, so an unexpected shape reads as a guest, never a panic.
 
-use deckcraft_ui_egui::account::{AccountError, AccountSnapshot, AccountView, LicenceView, OrgView, SignedInView, is_pro_feature};
+use deckcraft_ui_egui::account::{AccountError, AccountSnapshot, AccountView, LicenceView, OrgView, SignedInView, is_paid_feature};
 use serde_json::Value;
 
 const API_VERSION: u64 = 1;
@@ -75,7 +75,7 @@ fn signed_in(snapshot: &Value, error: Option<AccountError>) -> SignedInView {
     let pro = snapshot
         .get("entitlements")
         .and_then(Value::as_array)
-        .is_some_and(|list| list.iter().filter_map(|e| e.get("feature").and_then(Value::as_str)).any(is_pro_feature));
+        .is_some_and(|list| list.iter().filter_map(|e| e.get("feature").and_then(Value::as_str)).any(is_paid_feature));
     SignedInView {
         name: text(user, "name").unwrap_or_default(),
         email: text(user, "email").filter(|e| !e.is_empty()),
@@ -96,7 +96,7 @@ pub use browser::install;
 mod browser {
     use std::cell::RefCell;
 
-    use deckcraft_ui_egui::account::{AccountError, AccountHook, AccountSnapshot, is_pro_feature};
+    use deckcraft_ui_egui::account::{AccountError, AccountHook, AccountSnapshot, is_paid_feature};
     use wasm_bindgen::closure::Closure;
     use wasm_bindgen::{JsCast as _, JsValue};
 
@@ -261,7 +261,8 @@ mod browser {
         // No device activation on the web.
         fn retry_activation(&self) {}
         fn allowed(&self, feature: &str) -> bool {
-            let fallback = !is_pro_feature(feature);
+            // `use` needs a lease only on desktop; the web free tier edits without one.
+            let fallback = !is_paid_feature(feature);
             let Some(api) = with_bridge(|b| b.api.clone()) else { return fallback };
             match method(&api, "allowed").map(|f| f.call1(&api, &JsValue::from_str(feature))) {
                 Some(Ok(answer)) => answer.as_bool().unwrap_or(fallback),
@@ -326,7 +327,7 @@ mod tests {
         let mut licensed = signed_in_snapshot();
         licensed["entitlements"] = json!([{"feature": "erpconsoffice.view"}, {"feature": "erpconsoffice.use"}]);
         let AccountView::SignedIn(view) = snapshot_of(&licensed, false).view else { panic!("not signed in") };
-        assert_eq!(view.licence, LicenceView::Online { pro: true }, "Office's free plan licenses editing");
+        assert_eq!(view.licence, LicenceView::Free, "Office's free plan grants editing, not a paid plan");
 
         let mut pro = signed_in_snapshot();
         pro["entitlements"] = json!([{"feature": "trinhchieu.advanced"}]);

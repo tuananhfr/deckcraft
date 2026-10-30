@@ -126,6 +126,12 @@ pub fn is_pro_feature(feature: &str) -> bool {
     !(feature.ends_with(".view") || feature.ends_with(".export"))
 }
 
+/// Whether holding `feature` means a paid plan: a pro feature other than `.use`, which the free
+/// plan grants.
+pub fn is_paid_feature(feature: &str) -> bool {
+    is_pro_feature(feature) && !feature.ends_with(".use")
+}
+
 /// The avatar letter: the given name's first letter (Vietnamese names put it last, as the office
 /// shell does), else the email's.
 pub fn avatar_letter(name: &str, email: Option<&str>) -> Option<String> {
@@ -166,7 +172,7 @@ pub(crate) fn poll(app: &mut SlideApp, ctx: &egui::Context) {
 
 #[cfg(test)]
 mod tests {
-    use super::is_pro_feature;
+    use super::{is_paid_feature, is_pro_feature};
 
     #[test]
     fn the_avatar_shows_the_given_name_like_the_office_shell() {
@@ -183,6 +189,16 @@ mod tests {
         }
         for pro in ["erpconsoffice.use", "trinhchieu.use", "trinhchieu.advanced", "trinhchieu.media.record", "trinhchieu.viewer"] {
             assert!(is_pro_feature(pro), "{pro}");
+        }
+    }
+
+    #[test]
+    fn editing_is_no_paid_feature() {
+        for unpaid in ["erpconsoffice.view", "erpconsoffice.export", "erpconsoffice.use", "trinhchieu.use"] {
+            assert!(!is_paid_feature(unpaid), "{unpaid}");
+        }
+        for paid in ["erpconsoffice.advanced", "trinhchieu.media.record", "erpconsoffice.use.extra"] {
+            assert!(is_paid_feature(paid), "{paid}");
         }
     }
 }

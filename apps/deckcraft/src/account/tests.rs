@@ -44,7 +44,7 @@ fn status_maps_to_the_view() {
     assert_eq!(view.orgs[0].role.as_deref(), Some("member"));
     assert_eq!(view.orgs[1].role, None, "an empty role is no role");
     assert_eq!(view.active_org.as_deref(), Some("org_a"));
-    assert_eq!(view.licence, LicenceView::Active { expires_at: 1_800_000_000, pro: true }, "editing needs the lease");
+    assert_eq!(view.licence, LicenceView::Active { expires_at: 1_800_000_000, pro: false }, "the free plan's lease is no paid plan");
     assert_eq!(view.warning, Some(WarningView { days: 3, expires_at: 1_800_000_000 }));
     assert!(!view.online && view.reauth_required && !view.session_only);
     let mut no_user = signed_in_status(LicenceState::NotActivated);
@@ -61,7 +61,8 @@ fn licence_states_map_to_the_view() {
         |features: &[&str]| LicenceState::Active { lease_id: "l".into(), features: features.iter().map(|f| f.to_string()).collect(), expires_at: 5 };
     assert_eq!(licence_of(&LicenceState::NotActivated), LicenceView::Free);
     assert_eq!(licence_of(&active(&[OFFICE_VIEW, "erpconsoffice.export"])), LicenceView::Active { expires_at: 5, pro: false });
-    assert_eq!(licence_of(&active(&[OFFICE_VIEW, OFFICE_USE])), LicenceView::Active { expires_at: 5, pro: true });
+    assert_eq!(licence_of(&active(&[OFFICE_VIEW, OFFICE_USE])), LicenceView::Active { expires_at: 5, pro: false }, "the free plan");
+    assert_eq!(licence_of(&active(&[OFFICE_VIEW, OFFICE_USE, "erpconsoffice.advanced"])), LicenceView::Active { expires_at: 5, pro: true });
     assert_eq!(licence_of(&LicenceState::Inactive { lease_id: "l".into(), expires_at: 9 }), LicenceView::Inactive { expires_at: 9 });
     assert_eq!(licence_of(&LicenceState::DeviceRevoked), LicenceView::DeviceRevoked);
     assert_eq!(licence_of(&LicenceState::DeviceCapReached), LicenceView::DeviceCapReached);

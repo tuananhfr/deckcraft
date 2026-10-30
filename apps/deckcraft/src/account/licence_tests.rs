@@ -95,10 +95,26 @@ fn a_guest_is_locked_and_signing_in_to_the_free_plan_unlocks_editing() {
     wait_lock(&hook, None);
     let AccountView::SignedIn(view) = hook.snapshot().view else { panic!("signed in") };
     assert_eq!(view.active_org.as_deref(), Some(ORG_OFFICE));
-    assert!(matches!(view.licence, LicenceView::Active { pro: true, .. }), "{:?}", view.licence);
+    assert!(matches!(view.licence, LicenceView::Active { pro: false, .. }), "the free plan is no paid plan: {:?}", view.licence);
     let activations = env.server.requests().into_iter().filter(|r| r.path == "/api/v1/id/devices/activate").count();
     assert_eq!(activations, 1, "one activation, for the one Office product");
     assert_eq!(env.server.device_rows().len(), 1);
+}
+
+#[test]
+fn the_free_plan_lease_raises_no_expiry_warning() {
+    let env = Env::new(Scenario::office_free());
+    let hook = env.hook();
+    signed_in(&hook);
+    wait_lock(&hook, None);
+    // Two days left on the 7-day lease: the library's 3-day stage.
+    env.advance(5 * 86_400);
+    let status = account(&hook).status();
+    let Status::SignedIn(s) = &status else { panic!("signed in") };
+    assert!(s.warning.is_some(), "the library still raises it for `use`");
+    let AccountView::SignedIn(view) = view_of(&status) else { panic!("signed in") };
+    assert!(matches!(view.licence, LicenceView::Active { pro: false, .. }), "read as Free, so no notice: {:?}", view.licence);
+    assert_eq!(hook.edit_lock(), None, "still editable");
 }
 
 #[test]

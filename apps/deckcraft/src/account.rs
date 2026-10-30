@@ -17,7 +17,8 @@ use std::sync::{
 use std::time::{Duration, Instant};
 
 use deckcraft_ui_egui::account::{
-    AccountError, AccountHook, AccountSnapshot, AccountView, EditLock, LicenceView, OrgView, SignedInView, WarningView, is_pro_feature,
+    AccountError, AccountHook, AccountSnapshot, AccountView, EditLock, LicenceView, OrgView, SignedInView, WarningView, is_paid_feature,
+    is_pro_feature,
 };
 use deckcraft_ui_egui::i18n;
 use erpcons_account::{
@@ -457,8 +458,10 @@ fn view_of(status: &Status) -> AccountView {
 fn licence_of(licence: &LicenceState) -> LicenceView {
     match licence {
         LicenceState::NotActivated => LicenceView::Free,
+        // The free plan's lease grants `use` and renews itself while online: it reads Free, with no
+        // 7/3/1-day warning; only features beyond it make a paid plan.
         LicenceState::Active { features, expires_at, .. } => {
-            LicenceView::Active { expires_at: *expires_at, pro: features.iter().any(|f| is_pro_feature(f)) }
+            LicenceView::Active { expires_at: *expires_at, pro: features.iter().any(|f| is_paid_feature(f)) }
         }
         LicenceState::Inactive { expires_at, .. } => LicenceView::Inactive { expires_at: *expires_at },
         LicenceState::DeviceRevoked => LicenceView::DeviceRevoked,
