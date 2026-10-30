@@ -1524,15 +1524,15 @@
 	Offline. Your account syncs when you reconnect.	Ngoại tuyến. Tài khoản sẽ đồng bộ khi có mạng trở lại.
 	Sign out	Đăng xuất
 	Free	Miễn phí
-	Paid features are valid until {date}.	Tính năng trả phí dùng được đến {date}.
-	Paid features are active.	Tính năng trả phí đang hoạt động.
+	Your license is valid until {date}.	Giấy phép có hiệu lực đến {date}.
+	Your license is active.	Giấy phép đang có hiệu lực.
 	Your license expired on {date}. Free features keep working.	Giấy phép đã hết hạn ngày {date}. Các tính năng miễn phí vẫn dùng bình thường.
 	This device was removed from your account. Free features keep working.	Thiết bị này đã bị gỡ khỏi tài khoản. Các tính năng miễn phí vẫn dùng bình thường.
 	Your account has reached its device limit, so this device is not activated.	Tài khoản đã đạt giới hạn số thiết bị nên thiết bị này chưa được kích hoạt.
 	Signed in for this session only: this computer has no credential store.	Chỉ đăng nhập trong phiên này: máy tính này không có kho lưu thông tin đăng nhập.
 	Signing in…	Đang đăng nhập…
 	Sign in	Đăng nhập
-	Paid features expire on {date}. Connect to the internet to renew them.	Tính năng trả phí hết hạn ngày {date}. Hãy kết nối Internet để gia hạn.
+	Your license expires on {date}. Connect to the internet to renew it.	Giấy phép hết hạn ngày {date}. Hãy kết nối Internet để gia hạn.
 	The browser blocked the sign-in window. Allow pop-ups for this site and try again.	Trình duyệt đã chặn cửa sổ đăng nhập. Hãy cho phép cửa sổ bật lên cho trang này rồi thử lại.
 	Could not reach PI ID. Check your connection and try again.	Không kết nối được PI ID. Hãy kiểm tra mạng rồi thử lại.
 	PI ID took too long to answer. Try again.	PI ID phản hồi quá lâu. Hãy thử lại.
@@ -1548,6 +1548,19 @@
 	Signed in to PI ID. You can close this tab and go back to the app.	Đã đăng nhập PI ID. Bạn có thể đóng thẻ này và quay lại ứng dụng.
 	Sign-in did not finish. Close this tab and try again in the app.	Chưa đăng nhập xong. Hãy đóng thẻ này và thử lại trong ứng dụng.
 	The presentation couldn't be saved to the server.	Không lưu được bản trình chiếu lên máy chủ.
+
+# ERPCons: the desktop's licence lock (erpcons-account 0.5.0): why editing is off.
+	Checking your PI ID license…	Đang kiểm tra giấy phép PI ID…
+	Sign in with PI ID to edit	Đăng nhập PI ID để sửa
+	Choose an organization to edit	Chọn tổ chức để sửa
+	This device was removed from your PI ID account. Sign in again to edit	Thiết bị này đã bị gỡ khỏi tài khoản PI ID. Đăng nhập lại để sửa
+	Your PI ID plan has reached its device limit. Remove a device in PI ID, then press Retry	Gói PI ID đã đủ số thiết bị. Gỡ bớt một thiết bị trong PI ID rồi bấm Thử lại
+	This device is not activated for editing yet	Thiết bị này chưa được kích hoạt để sửa
+	Editing needs a credential store on this computer	Cần kho lưu thông tin đăng nhập trên máy này để sửa
+	Your license has expired. Connect to the internet to renew it	Giấy phép đã hết hạn. Kết nối mạng để gia hạn
+	Could not renew your license. The app keeps trying	Chưa gia hạn được giấy phép. Ứng dụng sẽ tự thử lại
+	This organization has no ERPCons Office plan	Tổ chức này chưa có gói ERPCons Office
+	PI ID licensing is unavailable on this computer, so editing is off	Không dùng được giấy phép PI ID trên máy này nên tạm khóa sửa
 
 # ERPCons: online documents the office site opens to view or comment only (erpHost v2).
 	You can only view this presentation.	Bạn chỉ có quyền xem bản trình bày này.

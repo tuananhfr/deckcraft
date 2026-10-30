@@ -1,5 +1,6 @@
 //! What a host lets the user do with one open presentation (the office site's view and comment
-//! modes, `erpHost` v2). It lives on the open document only and is never written into a file.
+//! modes, `erpHost` v2, and the desktop's licence lock). It lives on the open document only and is
+//! never written into a file.
 
 use std::sync::Arc;
 
@@ -18,17 +19,26 @@ pub struct Access {
     pub editable: bool,
     /// Save As, Export, Print and copying content to the clipboard.
     pub can_download: bool,
+    /// Save to the presentation's own file, even when it can't be changed.
+    pub can_save: bool,
 }
 
 impl Default for Access {
     fn default() -> Self {
-        Access { editable: true, can_download: true }
+        Access { editable: true, can_download: true, can_save: true }
     }
 }
 
 impl Access {
+    /// The host's view modes: the host keeps the file, so there is nothing to save either.
     pub fn read_only(can_download: bool) -> Self {
-        Access { editable: false, can_download }
+        Access { editable: false, can_download, can_save: false }
+    }
+
+    /// No changes, but Save, Save As, Export, Print and copying stay (the desktop's licence lock):
+    /// what was changed before the lock can still be saved.
+    pub fn edits_locked() -> Self {
+        Access { editable: false, can_download: true, can_save: true }
     }
 }
 
@@ -105,8 +115,9 @@ pub fn refusal(access: Access, spec: &CommandSpec) -> Option<&'static str> {
     if !access.can_download && DOWNLOADING.contains(&spec.id) {
         return Some(NO_DOWNLOAD);
     }
-    // Copying and Save As change nothing; Cut does.
-    let viewing = VIEWING.contains(&spec.id) || (DOWNLOADING.contains(&spec.id) && spec.id != "edit.cut");
+    // Copying, Save As and Save change nothing; Cut does.
+    let viewing =
+        VIEWING.contains(&spec.id) || (DOWNLOADING.contains(&spec.id) && spec.id != "edit.cut") || (spec.id == "file.save" && access.can_save);
     (!access.editable && !viewing).then_some(READ_ONLY)
 }
 
@@ -123,6 +134,12 @@ impl Session {
     /// The active presentation can be changed (true with none open).
     pub fn editable(&self) -> bool {
         self.active().is_none_or(|d| d.access.editable)
+    }
+
+    /// The access every presentation opened or created from now on starts with, instead of full
+    /// access, so none is editable for a moment before the host applies its own.
+    pub fn set_new_document_access(&mut self, access: Access) {
+        self.new_document_access = access;
     }
 
     /// Sets presentation `uid`'s access, keeping its content and undo history. Going read-only

@@ -291,9 +291,7 @@ fn main() -> eframe::Result {
             load_prefs(&mut app);
             i18n::set_current(i18n::Lang::from_pref(&app.ui.language));
             // Runs without preferences (tests, headless control) keep away from the user's credential store too.
-            if std::env::var_os("DECKCRAFT_NO_PREFS").is_none()
-                && let Some(account) = account::install()
-            {
+            if let Some(account) = account::install(std::env::var_os("DECKCRAFT_NO_PREFS").is_none()) {
                 app.account_hook = Some(std::sync::Arc::new(account));
             }
             // AutoRecover: reopen what a previous run left unsaved, then keep it current.

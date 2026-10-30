@@ -134,7 +134,7 @@ fn without_a_hook_nothing_changes_and_everything_is_allowed() {
     assert!(h.query_all_by_label_contains(NO_ACCOUNTS).next().is_some(), "the page is as before");
     assert!(h.query_by_label("User Information").is_some());
     assert!(h.query_by_label("Sign in with PI ID").is_none());
-    assert!(h.query_by_label_contains("Paid features").is_none(), "no expiry notice");
+    assert!(h.query_by_label_contains("Your license expires").is_none(), "no expiry notice");
 }
 
 #[test]
@@ -195,7 +195,7 @@ fn licence_lines_device_limit_retry_and_one_message_per_fact() {
     let fake = Fake::with(signed_in(LicenceView::Active { expires_at: EXPIRES, pro: true }, None));
     let mut h = harness(Some(fake.clone()), DESKTOP, "en");
     open_account_page(&mut h);
-    h.get_by_label(&format!("Paid features are valid until {}.", date_text(EXPIRES)));
+    h.get_by_label(&format!("Your license is valid until {}.", date_text(EXPIRES)));
     fake.set(signed_in(LicenceView::Inactive { expires_at: EXPIRES }, None), None);
     h.run_steps(2);
     h.get_by_label(&format!("Your license expired on {}. Free features keep working.", date_text(EXPIRES)));
@@ -227,7 +227,7 @@ fn licence_lines_device_limit_retry_and_one_message_per_fact() {
 #[test]
 fn the_lease_warning_shows_only_for_paid_features_and_closing_reports_it() {
     let warning = Some(WarningView { days: 3, expires_at: EXPIRES });
-    let text = "Paid features expire on";
+    let text = "Your license expires on";
     for licence in [LicenceView::Free, LicenceView::Active { expires_at: EXPIRES, pro: false }, LicenceView::Online { pro: true }] {
         let h = harness(Some(Fake::with(signed_in(licence, warning))), DESKTOP, "en");
         assert!(h.query_by_label_contains(text).is_none(), "{licence:?}");

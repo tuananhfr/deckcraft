@@ -1,6 +1,7 @@
 //! The host's access to the active presentation in the interface (the office site's view and
-//! comment modes): editing is not offered, Save only says why, and without download Save As,
-//! Export, Print, Share and copying are gone. The engine refuses the same changes on its own.
+//! comment modes, the desktop's licence lock): editing is not offered, Save only says why unless
+//! the access keeps it, and without download Save As, Export, Print, Share and copying are gone.
+//! The engine refuses the same changes on its own.
 
 use deckcraft_engine::access::{self, Access, NO_DOWNLOAD, READ_ONLY};
 use deckcraft_engine::{EngineError, find_command};
@@ -47,6 +48,12 @@ impl SlideApp {
 
     pub fn can_download(&self) -> bool {
         self.access().can_download
+    }
+
+    /// Save to the presentation's own file: editable, or locked by the licence only.
+    pub fn can_save(&self) -> bool {
+        let a = self.access();
+        a.editable || a.can_save
     }
 
     /// Sets presentation `uid`'s access. Going read-only, what is still typed into a field is
@@ -112,9 +119,17 @@ impl SlideApp {
         }
     }
 
-    /// The translated notice for a refusal's message, which names the command in English.
+    /// The translated notice for a refusal's message, which names the command in English. A
+    /// refusal by the licence lock gives its reason and tells the account hook.
     pub(crate) fn access_notice(&self, message: &str) -> Option<&'static str> {
-        if message.ends_with(READ_ONLY) {
+        if message.ends_with(READ_ONLY)
+            && let Some(lock) = self.licence_refusal()
+        {
+            if let Some(hook) = &self.account_hook {
+                hook.edit_refused();
+            }
+            Some(lock.text())
+        } else if message.ends_with(READ_ONLY) {
             let uid = self.session.active().map(|d| d.uid);
             Some(match uid.and_then(|uid| self.read_only_notices.get(&uid)) {
                 Some(ReadOnlyNotice::CommentsLater) => crate::tl!("Comments on the web are coming later; for now you can only view."),

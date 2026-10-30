@@ -1041,7 +1041,7 @@ impl SlideApp {
 
     pub fn save(&mut self) {
         let Some((uid, path)) = self.session.active().map(|d| (d.uid, d.path.clone())) else { return };
-        if !self.editable() {
+        if !self.can_save() {
             self.note_access(deckcraft_engine::access::READ_ONLY);
             return;
         }

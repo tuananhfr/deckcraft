@@ -1,6 +1,6 @@
-//! A read-only presentation (the office site's view and comment modes) refuses every change, by
-//! command, key, typing, input method and pointer, and keeps its content and undo history when
-//! its access changes either way.
+//! A read-only presentation (the office site's view and comment modes, the desktop's licence lock)
+//! refuses every change, by command, key, typing, input method and pointer, and keeps its content
+//! and undo history when its access changes either way.
 
 use std::sync::Arc;
 
@@ -302,7 +302,7 @@ fn a_hidden_object_picked_from_the_selection_pane_is_selected_not_shown_read_onl
 fn no_download_refuses_copy_save_as_and_export_even_when_editable() {
     let (mut s, shape) = deck();
     let uid = s.active().unwrap().uid;
-    for access in [Access::read_only(false), Access { editable: true, can_download: false }] {
+    for access in [Access::read_only(false), Access { editable: true, can_download: false, can_save: true }] {
         assert!(s.set_access(uid, access));
         for id in ["edit.copy", "edit.cut", "file.saveAs", "file.export", "file.saveTemplate", "file.saveBytes", "file.render"] {
             let r = s.execute(id, &json!({"ids": [shape], "path": "x.pptx", "format": "pptx"}));
@@ -312,6 +312,40 @@ fn no_download_refuses_copy_save_as_and_export_even_when_editable() {
     assert!(s.set_access(uid, Access::read_only(true)));
     s.execute("edit.copy", &json!({"ids": [shape]})).unwrap();
     assert!(!s.clipboard.shapes.is_empty(), "copying works when downloading is allowed");
+}
+
+#[test]
+fn locked_edits_still_save_and_new_presentations_start_locked() {
+    let (mut s, shape) = deck();
+    let uid = s.active().unwrap().uid;
+    assert!(s.set_access(uid, Access::edits_locked()));
+    assert!(s.active().unwrap().is_dirty(), "the shape inserted before the lock is still unsaved");
+    for (id, params) in one_per_family(shape) {
+        let before = snapshot(&s);
+        assert!(read_only_refusal(s.execute(id, &params)), "{id} wasn't refused");
+        unchanged(&s, &before, id);
+    }
+    let dir = std::env::temp_dir().join(format!("deckcraft-edits-locked-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = |name: &str| dir.join(name).to_string_lossy().into_owned();
+    s.execute("file.save", &json!({"path": path("saved.pptx")})).unwrap();
+    assert!(!s.active().unwrap().is_dirty(), "Save keeps what was changed before the lock");
+    s.execute("file.saveAs", &json!({"path": path("copy.pptx")})).unwrap();
+    s.execute("file.export", &json!({"path": path("slide.png"), "format": "png"})).unwrap();
+    s.execute("edit.copy", &json!({"ids": [shape]})).unwrap();
+    assert!(dir.join("saved.pptx").is_file() && dir.join("copy.pptx").is_file());
+    let _ = std::fs::remove_dir_all(&dir);
+    // The host view modes keep refusing Save.
+    assert!(s.set_access(uid, Access::read_only(true)));
+    assert!(read_only_refusal(s.execute("file.save", &json!({"path": path("view.pptx")}))));
+
+    s.set_new_document_access(Access::edits_locked());
+    s.execute("file.new", &json!({})).unwrap();
+    assert_eq!(s.active().unwrap().access, Access::edits_locked(), "a new presentation is never editable for a moment");
+    assert!(read_only_refusal(s.execute("slide.new", &json!({}))));
+    s.set_new_document_access(Access::default());
+    s.execute("file.new", &json!({})).unwrap();
+    assert_eq!(s.active().unwrap().access, Access::default());
 }
 
 #[test]

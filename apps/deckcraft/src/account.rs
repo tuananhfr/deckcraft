@@ -1,10 +1,13 @@
-//! Native adapter for the optional PI ID account (`erpcons-account`). Installed only in builds made
-//! with `ERPCONS_PI_ISSUER` (and optionally `ERPCONS_PI_API_BASE`); other builds get no hook, no
-//! thread, and never touch the credential store or the shared PI folder.
+//! Native adapter for the PI ID account (`erpcons-account`). Installed only in builds made with
+//! `ERPCONS_PI_ISSUER` (and optionally `ERPCONS_PI_API_BASE`); other builds get no hook, no
+//! thread, never touch the credential store or the shared PI folder, and are not gated.
 //!
 //! One worker thread owns the blocking [`Account`] and runs the UI's commands in order; the UI
-//! reads the last published snapshot. Only account state crosses to the library: never a
-//! presentation, path or file name.
+//! reads the last published snapshot, and the edit gate reads the account's cached state. Only
+//! account state crosses to the library: never a presentation, path or file name.
+
+mod config;
+mod gate;
 
 use std::sync::{
     Arc, Mutex, MutexGuard, OnceLock, PoisonError,
@@ -14,12 +17,14 @@ use std::sync::{
 use std::time::{Duration, Instant};
 
 use deckcraft_ui_egui::account::{
-    AccountError, AccountHook, AccountSnapshot, AccountView, LicenceView, OrgView, SignedInView, WarningView, is_pro_feature,
+    AccountError, AccountHook, AccountSnapshot, AccountView, EditLock, LicenceView, OrgView, SignedInView, WarningView, is_pro_feature,
 };
 use deckcraft_ui_egui::i18n;
 use erpcons_account::{
-    Account, ApiCode, Config, Error, LicenceState, MembershipStatus, OsSecretStore, Product, RevocationReason, SecretStore, Status, WarningStage,
+    Account, ApiCode, Config, Error, LicenceState, MembershipStatus, OsSecretStore, RevocationReason, SecretStore, Status, WarningStage,
 };
+
+use gate::{Resync, ResyncTiming};
 
 /// Read at build time only: a release names its issuer, and nothing at run time can point the app
 /// at another one.
@@ -39,14 +44,17 @@ const MIN_RETRY: Duration = Duration::from_secs(60);
 type Opener = Box<dyn Fn(&str) -> Result<(), String> + Send>;
 
 /// The account hook, when this build names a PI issuer. Call after the interface language is set:
-/// the browser's sign-in pages are written in it.
-pub fn install() -> Option<DesktopAccount> {
+/// the browser's sign-in pages are written in it. Without `credential_store` (runs without
+/// preferences) the account stays closed and editing stays locked: an environment variable must
+/// not lift the licence gate.
+pub fn install(credential_store: bool) -> Option<DesktopAccount> {
     let issuer = ISSUER.map(str::trim).filter(|issuer| !issuer.is_empty())?;
-    let mut config = Config::new(issuer, Product::TrinhChieu, env!("CARGO_PKG_VERSION"));
-    config.api_base = API_BASE.map(str::trim).filter(|base| !base.is_empty()).map(Into::into);
-    // PI has no Office product: device activation and leases stay off (ADR 0011).
-    config.offline_licensing = false;
-    DesktopAccount::new(config, Arc::new(OsSecretStore::new()), Box::new(open_browser))
+    if !credential_store {
+        return Some(DesktopAccount::unavailable());
+    }
+    let api_base = API_BASE.map(str::trim).filter(|base| !base.is_empty());
+    let config = config::config_for(issuer, api_base, env!("CARGO_PKG_VERSION"));
+    Some(DesktopAccount::new(config, Arc::new(OsSecretStore::new()), Box::new(open_browser)))
 }
 
 fn open_browser(url: &str) -> Result<(), String> {
@@ -63,6 +71,8 @@ enum Command {
     RetryActivation,
     WarningShown(WarningStage),
     Refresh,
+    /// Wakes the worker for a refused edit; `Shared::resync_wanted` says it is still wanted.
+    Resync,
 }
 
 /// What the worker and the UI thread share.
@@ -82,6 +92,10 @@ struct Shared {
     /// The last user command's error; a new command clears it at once.
     error: Mutex<Option<AccountError>>,
     refresh_queued: AtomicBool,
+    /// The account could not be opened or its worker is gone: editing stays locked.
+    unavailable: AtomicBool,
+    /// An edit was refused for a reason a sync may lift; the worker syncs when its schedule allows.
+    resync_wanted: AtomicBool,
 }
 
 fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -97,6 +111,7 @@ impl Shared {
 
     /// Every later command gets the same answer, instead of leaving the page waiting.
     fn unavailable(&self) {
+        self.unavailable.store(true, Ordering::SeqCst);
         self.pending.store(0, Ordering::SeqCst);
         self.in_browser.store(false, Ordering::SeqCst);
         *lock(&self.snapshot) = AccountSnapshot { error: Some(AccountError::Other), ..AccountSnapshot::default() };
@@ -111,7 +126,11 @@ pub struct DesktopAccount {
 
 impl DesktopAccount {
     /// `store` is the OS credential store in the app; tests pass a `MemorySecretStore`.
-    fn new(mut config: Config, store: Arc<dyn SecretStore>, opener: Opener) -> Option<Self> {
+    fn new(config: Config, store: Arc<dyn SecretStore>, opener: Opener) -> Self {
+        Self::with_timing(config, store, opener, ResyncTiming::default())
+    }
+
+    fn with_timing(mut config: Config, store: Arc<dyn SecretStore>, opener: Opener, timing: ResyncTiming) -> Self {
         let vietnamese = i18n::current().code() == "vi";
         config.ui_locale = Some(if vietnamese { "vi" } else { "en" }.into());
         config.callback_success_html = callback_page("Signed in to PI ID. You can close this tab and go back to the app.");
@@ -119,14 +138,21 @@ impl DesktopAccount {
         let shared = Arc::new(Shared::default());
         let (commands, rx) = mpsc::channel();
         let worker = shared.clone();
-        let spawned = std::thread::Builder::new().name("pi-account".into()).spawn(move || Worker::run(worker, config, store, opener, rx));
-        match spawned {
-            Ok(_) => Some(Self { shared, commands }),
-            Err(error) => {
-                log::warn!("PI account worker not started: {error}");
-                None
-            }
+        let spawned = std::thread::Builder::new().name("pi-account".into()).spawn(move || Worker::run(worker, config, store, opener, timing, rx));
+        if let Err(error) = spawned {
+            // Without the worker nothing can grant a lease; the page says PI ID is unavailable.
+            log::warn!("PI account worker not started: {error}");
+            shared.unavailable();
         }
+        Self { shared, commands }
+    }
+
+    /// A hook whose account never opens: File › Account says so and editing stays locked.
+    fn unavailable() -> Self {
+        let shared = Arc::new(Shared::default());
+        shared.unavailable();
+        let (commands, _) = mpsc::channel();
+        Self { shared, commands }
     }
 
     /// Queues a user command and shows it as running at once.
@@ -209,6 +235,21 @@ impl AccountHook for DesktopAccount {
         let _ = self.shared.ctx.set(ctx.clone());
         ctx.request_repaint();
     }
+
+    fn edit_lock(&self) -> Option<EditLock> {
+        if self.shared.unavailable.load(Ordering::SeqCst) {
+            return Some(EditLock::Unavailable);
+        }
+        let Some(account) = self.shared.account.get() else { return Some(EditLock::Checking) };
+        gate::lock_of(&account.status(), |feature| self.allowed(feature))
+    }
+
+    fn edit_refused(&self) {
+        // The worker rate-limits these syncs; only the first refusal sends, so they never pile up.
+        if self.edit_lock().is_some_and(EditLock::sync_may_lift) && !self.shared.resync_wanted.swap(true, Ordering::SeqCst) {
+            let _ = self.commands.send(Command::Resync);
+        }
+    }
 }
 
 /// The page the browser shows after the sign-in callback, in the interface language.
@@ -223,10 +264,11 @@ struct Worker {
     opener: Opener,
     next_refresh: Instant,
     next_reload: Instant,
+    resync: Resync,
 }
 
 impl Worker {
-    fn run(shared: Arc<Shared>, config: Config, store: Arc<dyn SecretStore>, opener: Opener, rx: Receiver<Command>) {
+    fn run(shared: Arc<Shared>, config: Config, store: Arc<dyn SecretStore>, opener: Opener, timing: ResyncTiming, rx: Receiver<Command>) {
         let account = match Account::new(config, store) {
             Ok(account) => Arc::new(account),
             Err(error) => {
@@ -244,10 +286,12 @@ impl Worker {
         }
         let now = Instant::now();
         // The first refresh runs at once (when signed in), then hourly.
-        let mut worker = Worker { shared, account, opener, next_refresh: now, next_reload: now + RELOAD_EVERY };
+        let resync = Resync::new(timing, now);
+        let mut worker = Worker { shared, account, opener, next_refresh: now, next_reload: now + RELOAD_EVERY, resync };
         worker.publish();
         loop {
             let due = worker.next_refresh.min(worker.next_reload);
+            let due = if worker.shared.resync_wanted.load(Ordering::SeqCst) { due.min(worker.resync.not_before) } else { due };
             match rx.recv_timeout(due.saturating_duration_since(Instant::now())) {
                 Ok(Command::Refresh) => {
                     worker.shared.refresh_queued.store(false, Ordering::SeqCst);
@@ -258,12 +302,16 @@ impl Worker {
                         log::warn!("PI expiry warning not recorded: {error}");
                     }
                 }
+                Ok(Command::Resync) => {}
                 Ok(command) => {
                     worker.handle(command);
                     worker.shared.pending.fetch_sub(1, Ordering::SeqCst);
                 }
                 Err(RecvTimeoutError::Timeout) => worker.tick(),
                 Err(RecvTimeoutError::Disconnected) => return,
+            }
+            if worker.shared.resync_wanted.load(Ordering::SeqCst) && Instant::now() >= worker.resync.not_before {
+                worker.resync();
             }
             worker.publish();
         }
@@ -284,6 +332,11 @@ impl Worker {
     /// Start-up, hourly and on-demand sync. Its failures stay silent and are retried: the page
     /// already says when the app is offline, and only the user's own commands show errors.
     fn refresh(&mut self) {
+        let _ = self.sync();
+    }
+
+    /// [`refresh`](Self::refresh), returning how it went. A guest has nothing to sync.
+    fn sync(&mut self) -> Result<(), Error> {
         let now = Instant::now();
         self.next_reload = now + RELOAD_EVERY;
         if !matches!(self.account.status(), Status::SignedIn(_)) {
@@ -291,9 +344,10 @@ impl Worker {
                 log::warn!("PI session not read: {error}");
             }
             self.next_refresh = now + REFRESH_EVERY;
-            return;
+            return Ok(());
         }
-        let wait = match self.account.refresh() {
+        let result = self.account.refresh();
+        let wait = match &result {
             Ok(()) => REFRESH_EVERY,
             Err(error) if error.is_transient() => {
                 log::info!("PI account refresh postponed: {error}");
@@ -305,6 +359,26 @@ impl Worker {
             }
         };
         self.next_refresh = Instant::now() + wait;
+        result
+    }
+
+    /// The sync a refused edit asked for, then the next one's slot.
+    fn resync(&mut self) {
+        // Cleared first: an edit refused while this runs asks again for the next slot.
+        self.shared.resync_wanted.store(false, Ordering::SeqCst);
+        let result = self.sync();
+        let still_refused = gate::lock_of(&self.account.status(), |feature| self.account.allowed(feature)).is_some_and(EditLock::sync_may_lift);
+        self.resync.after(Instant::now(), &result, still_refused);
+    }
+
+    /// The user's Retry: sync now, and activate again when a device cap or a missing plan
+    /// blocked activation (the library keeps that block until asked).
+    fn retry(&mut self) -> Result<(), Error> {
+        self.resync.failures = 0;
+        let synced = self.sync();
+        let blocked = matches!(self.account.status(), Status::SignedIn(s)
+            if matches!(s.licence, LicenceState::DeviceCapReached | LicenceState::NotEntitled));
+        if blocked { self.account.retry_activation() } else { synced }
     }
 
     fn handle(&mut self, command: Command) {
@@ -312,8 +386,8 @@ impl Worker {
             Command::SignIn => self.through_browser(|account, open| account.sign_in(open)),
             Command::SignOut => self.account.sign_out(),
             Command::SelectOrg(org) => self.through_browser(|account, open| account.select_org(org.as_deref(), open)),
-            Command::RetryActivation => self.account.retry_activation(),
-            Command::WarningShown(_) | Command::Refresh => Ok(()),
+            Command::RetryActivation => self.retry(),
+            Command::WarningShown(_) | Command::Refresh | Command::Resync => Ok(()),
         };
         match result {
             Ok(()) => self.next_refresh = Instant::now() + REFRESH_EVERY,
@@ -426,5 +500,7 @@ fn error_view(error: &Error) -> Option<AccountError> {
     })
 }
 
+#[cfg(test)]
+mod licence_tests;
 #[cfg(test)]
 mod tests;

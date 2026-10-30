@@ -1,9 +1,9 @@
-//! The PI ID section of File › Account, the title bar's account button and the paid licence
+//! The PI ID section of File › Account, the title bar's account button and the licence
 //! expiry notice.
 
 use egui::{Align2, CornerRadius, Rect, RichText, Sense, Ui, vec2};
 
-use super::{AccountError, AccountView, LicenceView, SignedInView};
+use super::{AccountError, AccountView, EditLock, LicenceView, SignedInView};
 use crate::backstage::{Page, dim, heading};
 use crate::icons::{self, Icon};
 use crate::theme::{self, Tokens};
@@ -25,6 +25,7 @@ enum Action {
 pub(crate) fn section(app: &mut SlideApp, ui: &mut Ui) {
     let Some(hook) = app.account_hook.clone() else { return };
     let snapshot = app.account.snapshot.clone();
+    let lock = app.account.lock;
     let t = Tokens::get(ui.ctx());
     let mut action = None;
     ui.vertical(|ui| {
@@ -32,7 +33,10 @@ pub(crate) fn section(app: &mut SlideApp, ui: &mut Ui) {
         heading(ui, "User Information");
         match &snapshot.view {
             AccountView::Guest => {
-                dim(ui, tl!("Signing in is optional: every feature works without an account."));
+                match lock {
+                    Some(lock) => locked(ui, lock, &t),
+                    None => dim(ui, tl!("Signing in is optional: every feature works without an account.")),
+                }
                 ui.add_space(10.0);
                 if primary(ui, tl!("Sign in with PI ID"), !snapshot.busy, &t).clicked() {
                     action = Some(Action::SignIn);
@@ -48,7 +52,7 @@ pub(crate) fn section(app: &mut SlideApp, ui: &mut Ui) {
                     action = Some(Action::CancelSignIn);
                 }
             }
-            AccountView::SignedIn(view) => signed_in(ui, view, snapshot.busy, &t, &mut action),
+            AccountView::SignedIn(view) => signed_in(ui, view, lock, snapshot.busy, &t, &mut action),
         }
         if let Some(text) = snapshot.error.filter(|e| !repeats_the_page(*e, &snapshot.view)).and_then(error_text) {
             ui.add_space(10.0);
@@ -66,7 +70,7 @@ pub(crate) fn section(app: &mut SlideApp, ui: &mut Ui) {
     }
 }
 
-fn signed_in(ui: &mut Ui, view: &SignedInView, busy: bool, t: &Tokens, action: &mut Option<Action>) {
+fn signed_in(ui: &mut Ui, view: &SignedInView, lock: Option<EditLock>, busy: bool, t: &Tokens, action: &mut Option<Action>) {
     let name = display_name(view);
     // One line, cut with "…" (full text on hover): wrapping would split an address mid-word.
     ui.add(egui::Label::new(RichText::new(&name).font(theme::bold(18.0)).color(t.text)).truncate());
@@ -101,7 +105,11 @@ fn signed_in(ui: &mut Ui, view: &SignedInView, busy: bool, t: &Tokens, action: &
         ui.add_space(14.0);
         subheading(ui, tl!("License"), t);
         ui.add(egui::Label::new(RichText::new(licence_text(view.licence)).font(theme::font(13.0)).color(t.text)).wrap());
-        if view.licence == LicenceView::DeviceCapReached {
+        if let Some(lock) = lock {
+            ui.add_space(4.0);
+            locked(ui, lock, t);
+        }
+        if view.licence == LicenceView::DeviceCapReached || lock.is_some_and(EditLock::retry_offered) {
             ui.add_space(4.0);
             if ui.button(tl!("Retry")).clicked() {
                 *action = Some(Action::RetryActivation);
@@ -122,6 +130,11 @@ fn signed_in(ui: &mut Ui, view: &SignedInView, busy: bool, t: &Tokens, action: &
             ui.spinner();
         }
     });
+}
+
+/// Why editing is off, said where the account can lift it.
+fn locked(ui: &mut Ui, lock: EditLock, t: &Tokens) {
+    ui.add(egui::Label::new(RichText::new(lock.text()).font(theme::bold(13.0)).color(t.text)).wrap());
 }
 
 fn subheading(ui: &mut Ui, text: &str, t: &Tokens) {
@@ -154,8 +167,8 @@ fn licence_text(licence: LicenceView) -> String {
     let dated = |key: &str, at: i64| i18n::fmt(i18n::t(key), &[("date", &date_text(at))]);
     match licence {
         LicenceView::Free | LicenceView::Online { pro: false } | LicenceView::Active { pro: false, .. } => tl!("Free").into(),
-        LicenceView::Active { expires_at, pro: true } => dated("Paid features are valid until {date}.", expires_at),
-        LicenceView::Online { pro: true } => tl!("Paid features are active.").into(),
+        LicenceView::Active { expires_at, pro: true } => dated("Your license is valid until {date}.", expires_at),
+        LicenceView::Online { pro: true } => tl!("Your license is active.").into(),
         LicenceView::Inactive { expires_at } => dated("Your license expired on {date}. Free features keep working.", expires_at),
         LicenceView::DeviceRevoked => tl!("This device was removed from your account. Free features keep working.").into(),
         LicenceView::DeviceCapReached => tl!("Your account has reached its device limit, so this device is not activated.").into(),
@@ -219,7 +232,7 @@ pub(crate) fn warning_notice(app: &mut SlideApp, ctx: &egui::Context) {
     if app.account.dismissed == Some(warning) {
         return;
     }
-    let text = i18n::fmt(tl!("Paid features expire on {date}. Connect to the internet to renew them."), &[("date", &date_text(warning.expires_at))]);
+    let text = i18n::fmt(tl!("Your license expires on {date}. Connect to the internet to renew it."), &[("date", &date_text(warning.expires_at))]);
     let t = Tokens::get(ctx);
     let (mut close, mut open) = (false, false);
     egui::Area::new(egui::Id::new("account_lease_warning")).anchor(Align2::CENTER_BOTTOM, vec2(0.0, -44.0)).order(egui::Order::Foreground).show(

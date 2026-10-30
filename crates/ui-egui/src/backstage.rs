@@ -142,12 +142,12 @@ pub fn entries(has_doc: bool, share: bool) -> (Vec<Nav>, Vec<Nav>) {
     (top, vec![Nav::Page(Page::Account), Nav::Options])
 }
 
-/// The side menu for the active presentation's access: no Save when it can't be changed, no
-/// Save As, Print or Export when its content may not leave the app.
+/// The side menu for the active presentation's access: no Save when it can't be changed (unless
+/// only the licence locks it), no Save As, Print or Export when its content may not leave the app.
 pub(crate) fn offered_entries(app: &SlideApp, has_doc: bool) -> (Vec<Nav>, Vec<Nav>) {
     let (mut top, bottom) = entries(has_doc, app.can_share());
     top.retain(|nav| match nav {
-        Nav::Save => app.editable(),
+        Nav::Save => app.can_save(),
         Nav::Page(page) => offered(app, *page),
         _ => true,
     });

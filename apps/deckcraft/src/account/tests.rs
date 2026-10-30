@@ -3,7 +3,9 @@ use std::io::{Read as _, Write as _};
 use std::net::TcpStream;
 use std::sync::atomic::AtomicBool;
 
-use erpcons_account::{ApiError, ExpiryWarning, Membership, MemorySecretStore, PinnedKey, SignedIn, User};
+use erpcons_account::{
+    ApiError, ExpiryWarning, Membership, MemorySecretStore, OFFICE_PI_PRODUCT, OFFICE_USE, OFFICE_VIEW, PinnedKey, SignedIn, User,
+};
 use pi_mock::{ORG_A, ORG_B, Scenario, Server};
 
 use super::*;
@@ -34,8 +36,7 @@ fn signed_in_status(licence: LicenceState) -> Status {
 fn status_maps_to_the_view() {
     assert_eq!(view_of(&Status::Guest), AccountView::Guest);
     assert_eq!(view_of(&Status::SigningIn), AccountView::SigningIn);
-    let licence =
-        LicenceState::Active { lease_id: "l".into(), features: vec!["trinhchieu.view".into(), "trinhchieu.use".into()], expires_at: 1_800_000_000 };
+    let licence = LicenceState::Active { lease_id: "l".into(), features: vec![OFFICE_VIEW.into(), OFFICE_USE.into()], expires_at: 1_800_000_000 };
     let AccountView::SignedIn(view) = view_of(&signed_in_status(licence)) else { panic!("signed in") };
     assert_eq!(view.name, "Nguyễn An");
     assert_eq!(view.email.as_deref(), Some("an@example.com"));
@@ -43,7 +44,7 @@ fn status_maps_to_the_view() {
     assert_eq!(view.orgs[0].role.as_deref(), Some("member"));
     assert_eq!(view.orgs[1].role, None, "an empty role is no role");
     assert_eq!(view.active_org.as_deref(), Some("org_a"));
-    assert_eq!(view.licence, LicenceView::Active { expires_at: 1_800_000_000, pro: false });
+    assert_eq!(view.licence, LicenceView::Active { expires_at: 1_800_000_000, pro: true }, "editing needs the lease");
     assert_eq!(view.warning, Some(WarningView { days: 3, expires_at: 1_800_000_000 }));
     assert!(!view.online && view.reauth_required && !view.session_only);
     let mut no_user = signed_in_status(LicenceState::NotActivated);
@@ -59,8 +60,8 @@ fn licence_states_map_to_the_view() {
     let active =
         |features: &[&str]| LicenceState::Active { lease_id: "l".into(), features: features.iter().map(|f| f.to_string()).collect(), expires_at: 5 };
     assert_eq!(licence_of(&LicenceState::NotActivated), LicenceView::Free);
-    assert_eq!(licence_of(&active(&["trinhchieu.view", "trinhchieu.export"])), LicenceView::Active { expires_at: 5, pro: false });
-    assert_eq!(licence_of(&active(&["trinhchieu.view", "trinhchieu.advanced"])), LicenceView::Active { expires_at: 5, pro: true });
+    assert_eq!(licence_of(&active(&[OFFICE_VIEW, "erpconsoffice.export"])), LicenceView::Active { expires_at: 5, pro: false });
+    assert_eq!(licence_of(&active(&[OFFICE_VIEW, OFFICE_USE])), LicenceView::Active { expires_at: 5, pro: true });
     assert_eq!(licence_of(&LicenceState::Inactive { lease_id: "l".into(), expires_at: 9 }), LicenceView::Inactive { expires_at: 9 });
     assert_eq!(licence_of(&LicenceState::DeviceRevoked), LicenceView::DeviceRevoked);
     assert_eq!(licence_of(&LicenceState::DeviceCapReached), LicenceView::DeviceCapReached);
@@ -138,11 +139,11 @@ fn the_browser_pages_are_translated_and_escaped() {
 fn no_issuer_no_account() {
     // Test builds never set the issuer, so the app's normal start installs nothing.
     assert!(ISSUER.is_none_or(|issuer| issuer.trim().is_empty()), "tests must be built without ERPCONS_PI_ISSUER");
-    assert!(install().is_none());
+    assert!(install(true).is_none() && install(false).is_none());
 }
 
 /// The system browser in tests: follows the authorization redirect to the app's loopback listener.
-fn follow_redirect(url: &str) -> Result<(), String> {
+pub(super) fn follow_redirect(url: &str) -> Result<(), String> {
     let url = url.to_owned();
     std::thread::spawn(move || {
         if let Some(location) = http_get(&url).and_then(|response| location_of(&response)) {
@@ -169,8 +170,8 @@ fn location_of(response: &str) -> Option<String> {
     })
 }
 
-fn mock_config(server: &Server, dir: &tempfile::TempDir) -> Config {
-    let mut config = Config::new(server.issuer(), Product::TrinhChieu, "0.6.5");
+pub(super) fn mock_config(server: &Server, dir: &tempfile::TempDir) -> Config {
+    let mut config = config::config_for(server.issuer(), None, "0.6.5");
     // The mock's development key is pinned here only, never in a build.
     config.platform_keys = vec![PinnedKey { kid: server.lease_key_id(), key: server.lease_public_key() }];
     config.state_dir = Some(dir.path().to_path_buf());
@@ -180,7 +181,7 @@ fn mock_config(server: &Server, dir: &tempfile::TempDir) -> Config {
     config
 }
 
-fn wait_for(hook: &DesktopAccount, what: &str, done: impl Fn(&AccountSnapshot) -> bool) -> AccountSnapshot {
+pub(super) fn wait_for(hook: &DesktopAccount, what: &str, done: impl Fn(&AccountSnapshot) -> bool) -> AccountSnapshot {
     let until = Instant::now() + Duration::from_secs(30);
     loop {
         let snapshot = hook.snapshot();
@@ -193,7 +194,11 @@ fn wait_for(hook: &DesktopAccount, what: &str, done: impl Fn(&AccountSnapshot) -
 }
 
 fn started(server: &Server, dir: &tempfile::TempDir, opener: Opener) -> DesktopAccount {
-    let hook = DesktopAccount::new(mock_config(server, dir), Arc::new(MemorySecretStore::new()), opener).unwrap();
+    opened(DesktopAccount::new(mock_config(server, dir), Arc::new(MemorySecretStore::new()), opener))
+}
+
+/// `hook` once its worker opened the account.
+pub(super) fn opened(hook: DesktopAccount) -> DesktopAccount {
     hook.attach(&egui::Context::default());
     let until = Instant::now() + Duration::from_secs(10);
     while hook.shared.account.get().is_none() {
@@ -209,7 +214,7 @@ fn signs_in_switches_organization_and_signs_out_against_pi_mock() {
     let dir = tempfile::tempdir().unwrap();
     let hook = started(&server, &dir, Box::new(follow_redirect));
     assert_eq!(wait_for(&hook, "guest", |s| s.view == AccountView::Guest).error, None);
-    assert!(hook.allowed("trinhchieu.use"));
+    assert!(hook.allowed(OFFICE_VIEW) && !hook.allowed(OFFICE_USE), "a guest views, editing needs a lease");
 
     hook.sign_in();
     assert_eq!(hook.snapshot().view, AccountView::SigningIn, "shown at once");
@@ -219,10 +224,10 @@ fn signs_in_switches_organization_and_signs_out_against_pi_mock() {
     assert_eq!(view.email.as_deref(), Some("an.nguyen@example.com"));
     assert!(!view.name.is_empty());
     assert_eq!(view.active_org, None);
-    assert_eq!(view.licence, LicenceView::Free, "Office keeps offline licensing off");
+    assert_eq!(view.licence, LicenceView::Free, "the personal context has no lease");
     assert!(view.online && !view.session_only && !view.reauth_required);
     assert_eq!(view.warning, None);
-    assert!(hook.allowed("trinhchieu.use"));
+    assert!(hook.allowed(OFFICE_VIEW));
 
     hook.select_org(Some(ORG_B.into()));
     assert_eq!(hook.snapshot().view, AccountView::SigningIn, "the switch waits for the browser");
@@ -244,9 +249,12 @@ fn signs_in_switches_organization_and_signs_out_against_pi_mock() {
     assert!(authorize[3].contains("prompt=select_account") && !authorize[3].contains("org_hint"), "personal is picked on PI's page");
     for request in &requests {
         let path = request.path.as_str();
-        let identity_only =
-            (path.starts_with("/id/") && path != "/id/lease-keys.json") || path.starts_with("/.well-known/") || path == "/api/v1/id/me";
-        assert!(identity_only, "Office calls no device, licence or entitlement endpoint: {} {path}", request.method);
+        let known = path.starts_with("/id/") || path.starts_with("/.well-known/") || path.starts_with("/api/v1/id/");
+        assert!(known, "only PI ID and its device protocol: {} {path}", request.method);
+        if matches!(path, "/api/v1/id/devices/challenge" | "/api/v1/id/devices/activate") {
+            let product = request.query.contains(OFFICE_PI_PRODUCT) || request.body.contains(OFFICE_PI_PRODUCT);
+            assert!(product, "the four apps activate one PI product: {path}");
+        }
     }
     let dir = dir.path().to_string_lossy().into_owned();
     for request in &requests {

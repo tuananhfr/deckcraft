@@ -28,7 +28,7 @@ impl Mode {
     /// In phase 2 `comment` is `view` for the content: server comments come in a later milestone.
     pub(crate) fn access(self, can_download: bool) -> Access {
         match self {
-            Mode::Edit => Access { editable: true, can_download },
+            Mode::Edit => Access { editable: true, can_download, can_save: true },
             Mode::Comment | Mode::View => Access::read_only(can_download),
         }
     }

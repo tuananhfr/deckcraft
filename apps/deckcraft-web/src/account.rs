@@ -292,7 +292,7 @@ mod tests {
             "orgs": [{"id": "o1", "name": "Công ty A", "role": "member"}, {"id": "o2", "name": "Công ty B", "role": null}, {"name": "no id"}],
             "activeOrg": {"id": "o2", "name": "Công ty B", "role": null},
             "product": "trinhchieu",
-            "entitlements": [{"id": "e1", "feature": "trinhchieu.use", "scope": "personal", "orgId": null, "validTo": null, "offlineAllowed": true}],
+            "entitlements": [{"id": "e1", "feature": "erpconsoffice.view", "scope": "personal", "orgId": null, "validTo": null, "offlineAllowed": true}],
             "entitlementsFresh": true,
             "error": null
         })
@@ -322,6 +322,11 @@ mod tests {
         assert_eq!(view.active_org.as_deref(), Some("o2"));
         assert_eq!(view.licence, LicenceView::Free);
         assert!(view.online && !view.session_only && !view.reauth_required && view.warning.is_none());
+
+        let mut licensed = signed_in_snapshot();
+        licensed["entitlements"] = json!([{"feature": "erpconsoffice.view"}, {"feature": "erpconsoffice.use"}]);
+        let AccountView::SignedIn(view) = snapshot_of(&licensed, false).view else { panic!("not signed in") };
+        assert_eq!(view.licence, LicenceView::Online { pro: true }, "Office's free plan licenses editing");
 
         let mut pro = signed_in_snapshot();
         pro["entitlements"] = json!([{"feature": "trinhchieu.advanced"}]);

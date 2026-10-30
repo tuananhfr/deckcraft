@@ -12,8 +12,8 @@ workspace = true
 
 [dependencies]
 erpcons-update = { git = "https://github.com/tuananhfr/erpcons-update", tag = "v0.1.0" }
-# Optional PI ID sign-in; inert unless the build sets ERPCONS_PI_ISSUER (`src/account.rs`).
-erpcons-account = { git = "https://github.com/tuananhfr/erpcons-account", tag = "v0.4.2" }
+# PI ID sign-in and the licence gate on editing; inert unless the build sets ERPCONS_PI_ISSUER (`src/account.rs`).
+erpcons-account = { git = "https://github.com/tuananhfr/erpcons-account", tag = "v0.5.0" }
 # Opens the PI ID sign-in page in the system browser.
 open = "5"
 deckcraft-engine = { workspace = true }
@@ -27,7 +27,7 @@ tempfile = "3.27"
 
 [dev-dependencies]
 # In-process PI Platform mock for the account adapter's sign-in tests.
-pi-mock = { git = "https://github.com/tuananhfr/erpcons-account", tag = "v0.4.2" }
+pi-mock = { git = "https://github.com/tuananhfr/erpcons-account", tag = "v0.5.0" }
 
 [build-dependencies]
 # Icon + VERSIONINFO for deckcraft.exe; build.rs only uses it when the target is Windows.

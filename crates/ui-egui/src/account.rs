@@ -1,10 +1,13 @@
 //! Optional PI ID account (ERPCons): the PI ID section of File › Account, the title bar's account
-//! button and the paid licence expiry notice. The host installs an [`AccountHook`] (desktop:
-//! `erpcons-account` on a worker thread; web: the office shell's `window.erpAccount`). Without one
-//! nothing here shows, File › Account is unchanged and every feature is allowed.
+//! button, the licence expiry notice and the desktop's licence lock. The host installs an
+//! [`AccountHook`] (desktop: `erpcons-account` on a worker thread; web: the office shell's
+//! `window.erpAccount`). Without one nothing here shows, File › Account is unchanged and every
+//! feature is allowed.
 
+mod lock;
 mod page;
 
+pub use lock::EditLock;
 pub use page::{date_text, error_text};
 pub(crate) use page::{section, title_button, warning_notice};
 
@@ -25,6 +28,14 @@ pub trait AccountHook {
     /// Called once with the egui context so the adapter can request a repaint when its snapshot
     /// changes.
     fn attach(&self, ctx: &egui::Context);
+    /// Why edits are refused now, read once per frame from cached state. Only the desktop gates
+    /// editing on a licence; the web stays editable for everyone.
+    fn edit_lock(&self) -> Option<EditLock> {
+        None
+    }
+    /// An edit was refused for [`edit_lock`](Self::edit_lock)'s reason; the adapter may sync with
+    /// PI sooner than its schedule.
+    fn edit_refused(&self) {}
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -109,12 +120,10 @@ pub enum AccountError {
     Other,
 }
 
-/// Whether holding `feature` means a paid plan. `.view` and `.export` are pinned free and the
-/// built-in catalog lists `<product>.use` as free (products.md §2, §3); anything else needs an
-/// entitlement.
+/// Whether holding `feature` needs a plan. Only `.view` and `.export` are pinned free (products.md
+/// §2); `erpconsoffice.use`, editing, needs the lease since erpcons-account 0.5.0 (ADR 0013).
 pub fn is_pro_feature(feature: &str) -> bool {
-    let builtin_free = feature.split_once('.').is_some_and(|(_, name)| name == "use");
-    !(feature.ends_with(".view") || feature.ends_with(".export") || builtin_free)
+    !(feature.ends_with(".view") || feature.ends_with(".export"))
 }
 
 /// The avatar letter: the given name's first letter (Vietnamese names put it last, as the office
@@ -132,23 +141,27 @@ pub(crate) struct AccountState {
     snapshot: AccountSnapshot,
     /// The expiry warning closed in this run; hidden even before the adapter's snapshot drops it.
     dismissed: Option<WarningView>,
+    /// The hook's licence lock in this frame.
+    pub(crate) lock: Option<EditLock>,
 }
 
 impl SlideApp {
-    /// Whether `feature` may be used. True without an account hook; nothing is gated on it yet.
+    /// Whether `feature` may be used. True without an account hook; nothing is gated on it yet
+    /// (editing is, through [`AccountHook::edit_lock`]).
     pub fn allowed(&self, feature: &str) -> bool {
         self.account_hook.as_ref().is_none_or(|hook| hook.allowed(feature))
     }
 }
 
-/// Attaches the hook on the first frame and reads its snapshot for this one.
+/// Attaches the hook on the first frame and reads its snapshot and licence lock for this one.
 pub(crate) fn poll(app: &mut SlideApp, ctx: &egui::Context) {
-    let Some(hook) = &app.account_hook else { return };
+    let Some(hook) = app.account_hook.clone() else { return };
     if !app.account.attached {
         app.account.attached = true;
         hook.attach(ctx);
     }
     app.account.snapshot = hook.snapshot();
+    lock::apply(app, hook.edit_lock());
 }
 
 #[cfg(test)]
@@ -163,11 +176,12 @@ mod tests {
     }
 
     #[test]
-    fn only_features_outside_the_free_built_ins_are_pro() {
-        for free in ["trinhchieu.view", "trinhchieu.export", "trinhchieu.use", "pdf.view", "vanban.export"] {
+    fn only_view_and_export_are_free() {
+        // erpcons-account's OFFICE_VIEW, OFFICE_EXPORT and OFFICE_USE; this crate also builds for the web.
+        for free in ["erpconsoffice.view", "erpconsoffice.export", "trinhchieu.view", "pdf.view", "vanban.export"] {
             assert!(!is_pro_feature(free), "{free}");
         }
-        for pro in ["trinhchieu.advanced", "trinhchieu.media.record", "trinhchieu.use.extra", "trinhchieu.viewer"] {
+        for pro in ["erpconsoffice.use", "trinhchieu.use", "trinhchieu.advanced", "trinhchieu.media.record", "trinhchieu.viewer"] {
             assert!(is_pro_feature(pro), "{pro}");
         }
     }

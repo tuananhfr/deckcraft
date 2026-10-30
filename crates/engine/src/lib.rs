@@ -437,6 +437,8 @@ pub struct Session {
     /// The signed-in account's name, which a host gives (the office site's PI account). It names
     /// new comments instead of `prefs.author` and is never saved with the preferences.
     pub host_author: Option<String>,
+    /// What a presentation added from now on starts with ([`Session::set_new_document_access`]).
+    new_document_access: Access,
 }
 
 impl Default for Session {
@@ -467,6 +469,7 @@ impl Session {
             mac_keys: cfg!(target_os = "macos"),
             closed: Default::default(),
             host_author: None,
+            new_document_access: Access::default(),
         }
     }
     /// Who new comments are by: the host's account, else the preference.
@@ -516,8 +519,11 @@ impl Session {
         if self.docs.len() == 1 || self.docs.len() >= MAX_DOCUMENTS { self.docs.iter().position(DocState::is_untouched_placeholder) } else { None }
     }
     /// Every open and new presentation comes through here, so this is where the limit holds.
-    pub fn add_document(&mut self, d: DocState) -> Result<usize> {
+    pub fn add_document(&mut self, mut d: DocState) -> Result<usize> {
         self.ensure_room()?;
+        if d.access == Access::default() {
+            d.access = self.new_document_access;
+        }
         if let Some(p) = self.replaced_placeholder() {
             self.close_document(p);
         }

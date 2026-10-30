@@ -212,7 +212,7 @@ fn home_button(app: &mut SlideApp, ui: &mut Ui) {
 }
 
 fn save_button(app: &mut SlideApp, ui: &mut Ui) {
-    if named(icon_toggle(ui, Icon::Save, "Save (⌘S)", app.session.active().is_some() && app.editable(), false), "Save (⌘S)").clicked() {
+    if named(icon_toggle(ui, Icon::Save, "Save (⌘S)", app.session.active().is_some() && app.can_save(), false), "Save (⌘S)").clicked() {
         app.request_save();
     }
 }

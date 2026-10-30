@@ -98,7 +98,7 @@ impl SlideApp {
     /// key that asked for it, so it opens now.
     pub fn request_save(&mut self) {
         let Some(uid) = self.session.active().map(|d| d.uid) else { return };
-        if !self.editable() {
+        if !self.can_save() {
             self.note_access(deckcraft_engine::access::READ_ONLY);
             return;
         }
