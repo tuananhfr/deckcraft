@@ -134,17 +134,22 @@ pub fn notes_page(app: &mut SlideApp, ui: &mut Ui) {
     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(notes_rect));
     let current = st.current_slide().map(|s| s.notes_text()).unwrap_or_default();
     let id = egui::Id::new(("notespage", idx));
-    let mut buf: String = child.data_mut(|d| d.get_temp(id).unwrap_or_else(|| current.clone()));
+    let editable = app.editable();
+    let mut buf: String = child.data_mut(|d| d.get_temp(id).filter(|_| editable).unwrap_or_else(|| current.clone()));
+    let mut shown = current.as_str();
+    // Read-only, an empty page shows nothing to click on, as the notes pane.
+    let field = if editable {
+        egui::TextEdit::multiline(&mut buf).hint_text(crate::tl!("Click to add text"))
+    } else {
+        egui::TextEdit::multiline(&mut shown).interactive(app.can_download())
+    };
     let r = child.add(
-        egui::TextEdit::multiline(&mut buf)
-            .hint_text(crate::tl!("Click to add text"))
-            .desired_width(notes_rect.width())
-            .desired_rows(12)
-            .frame(egui::Frame::NONE)
-            .text_color(Color32::from_gray(30))
-            .font(theme::font(14.0)),
+        field.desired_width(notes_rect.width()).desired_rows(12).frame(egui::Frame::NONE).text_color(Color32::from_gray(30)).font(theme::font(14.0)),
     );
-    if r.lost_focus() && buf != current {
+    if editable && r.has_focus() && buf != current {
+        app.track_inline_edit("slide.notes", json!({"text": buf, "index": idx}));
+    }
+    if editable && r.lost_focus() && buf != current {
         let _ = app.run("slide.notes", json!({"text": buf, "index": idx}));
     }
     child.data_mut(|d| d.insert_temp(id, buf));
@@ -166,6 +171,8 @@ pub fn outline_pane(app: &mut SlideApp, ui: &mut Ui) {
             let Some(st) = app.session.active() else { return };
             let doc = st.doc.clone();
             let cur = st.selection.slide;
+            // Read-only, the outline can be read, and selected to copy when downloading is allowed.
+            let (editable, can_copy) = (app.editable(), app.can_download());
             egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
                 for (i, s) in doc.slides.iter().enumerate() {
                     let title_shape = s.shapes.iter().find(|x| x.ph_type().is_some_and(|k| k.is_title())).map(|x| x.id.0);
@@ -180,13 +187,23 @@ pub fn outline_pane(app: &mut SlideApp, ui: &mut Ui) {
                         );
                         let id = egui::Id::new(("ol-title", s.id.0));
                         let cur_title = s.title();
-                        let mut v: String = ui.data_mut(|d| d.get_temp(id).unwrap_or_else(|| cur_title.clone()));
-                        let resp =
-                            ui.add(egui::TextEdit::singleline(&mut v).font(theme::bold(14.0)).frame(egui::Frame::NONE).desired_width(f32::INFINITY));
+                        let mut v: String = ui.data_mut(|d| d.get_temp(id).filter(|_| editable).unwrap_or_else(|| cur_title.clone()));
+                        let mut shown = cur_title.as_str();
+                        let field =
+                            if editable { egui::TextEdit::singleline(&mut v) } else { egui::TextEdit::singleline(&mut shown).interactive(can_copy) };
+                        let resp = ui.add(field.font(theme::bold(14.0)).frame(egui::Frame::NONE).desired_width(f32::INFINITY));
                         if resp.gained_focus() {
                             let _ = app.run("slide.go", json!({"index": i}));
                         }
-                        if resp.lost_focus()
+                        if editable
+                            && resp.has_focus()
+                            && v != cur_title
+                            && let Some(tid) = title_shape
+                        {
+                            app.track_inline_edit("text.set", json!({"id": tid, "text": v}));
+                        }
+                        if editable
+                            && resp.lost_focus()
                             && v != cur_title
                             && let Some(tid) = title_shape
                         {
@@ -206,15 +223,23 @@ pub fn outline_pane(app: &mut SlideApp, ui: &mut Ui) {
                         let id = egui::Id::new(("ol-body", s.id.0, sh.id.0));
                         let cur_text: String =
                             tb.paragraphs.iter().map(|p| format!("{}{}", "\t".repeat(p.level as usize), p.text())).collect::<Vec<_>>().join("\n");
-                        let mut v: String = ui.data_mut(|d| d.get_temp(id).unwrap_or_else(|| cur_text.clone()));
+                        let mut v: String = ui.data_mut(|d| d.get_temp(id).filter(|_| editable).unwrap_or_else(|| cur_text.clone()));
                         ui.horizontal(|ui| {
                             ui.add_space(36.0);
-                            let resp =
-                                ui.add(egui::TextEdit::multiline(&mut v).frame(egui::Frame::NONE).desired_width(f32::INFINITY).desired_rows(1));
+                            let mut shown = cur_text.as_str();
+                            let field = if editable {
+                                egui::TextEdit::multiline(&mut v)
+                            } else {
+                                egui::TextEdit::multiline(&mut shown).interactive(can_copy)
+                            };
+                            let resp = ui.add(field.frame(egui::Frame::NONE).desired_width(f32::INFINITY).desired_rows(1));
                             if resp.gained_focus() {
                                 let _ = app.run("slide.go", json!({"index": i}));
                             }
-                            if resp.lost_focus() && v != cur_text {
+                            if editable && resp.has_focus() && v != cur_text {
+                                app.track_inline_edit("text.set", json!({"id": sh.id.0, "text": v}));
+                            }
+                            if editable && resp.lost_focus() && v != cur_text {
                                 let _ = app.run("text.set", json!({"id": sh.id.0, "text": v}));
                             }
                             if !resp.has_focus() {

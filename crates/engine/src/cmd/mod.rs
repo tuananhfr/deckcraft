@@ -57,7 +57,7 @@ pub struct CommandInfo {
 
 impl CommandSpec {
     pub fn info(&self, s: &Session) -> CommandInfo {
-        let e = (self.enabled)(s);
+        let e = s.available(self);
         CommandInfo {
             id: self.id,
             label: self.label,

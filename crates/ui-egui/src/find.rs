@@ -62,6 +62,9 @@ pub fn show(app: &mut SlideApp, ctx: &egui::Context) {
         return;
     }
     let mut f = std::mem::take(&mut app.find);
+    // Replacing would change a read-only presentation; finding still works.
+    let editable = app.editable();
+    f.replace &= editable;
     let t = Tokens::get(ctx);
     let mut open = true;
     let mut close = false;
@@ -118,7 +121,7 @@ pub fn show(app: &mut SlideApp, ctx: &egui::Context) {
                     if ui.add_enabled(has_text, egui::Button::new(crate::tl!("Replace All"))).clicked() {
                         action = Some("edit.replaceAll");
                     }
-                } else if ui.button(crate::tl!("Replace…")).clicked() {
+                } else if editable && ui.button(crate::tl!("Replace…")).clicked() {
                     f.replace = true;
                     f.focus = Some(Field::With);
                 }

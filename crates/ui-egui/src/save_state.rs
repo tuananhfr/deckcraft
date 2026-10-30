@@ -98,6 +98,10 @@ impl SlideApp {
     /// key that asked for it, so it opens now.
     pub fn request_save(&mut self) {
         let Some(uid) = self.session.active().map(|d| d.uid) else { return };
+        if !self.editable() {
+            self.note_access(deckcraft_engine::access::READ_ONLY);
+            return;
+        }
         if self.services.save_file.is_some() {
             self.save();
         } else {

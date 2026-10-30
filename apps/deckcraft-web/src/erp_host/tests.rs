@@ -13,7 +13,9 @@ use serde_json::json;
 use super::ErpHost;
 use super::autosave::{IDLE_MS, Outcome, Reason};
 use super::documents::{HostApi, HostDocs};
+use super::mode::Mode;
 use super::open::OpenRequest;
+use super::request::Request;
 
 struct Save {
     doc_id: String,
@@ -54,7 +56,7 @@ struct World {
     host: ErpHost,
     calls: FakeHost,
     clock: Rc<Cell<f64>>,
-    opens: Rc<RefCell<Vec<OpenRequest>>>,
+    opens: Rc<RefCell<Vec<Request>>>,
 }
 
 fn pptx() -> Vec<u8> {
@@ -63,25 +65,40 @@ fn pptx() -> Vec<u8> {
 }
 
 fn request(doc_id: &str, version: u64) -> OpenRequest {
-    OpenRequest { doc_id: doc_id.into(), version, title: "Báo cáo quý.pptx".into(), format: "pptx".into(), bytes: Some(pptx()) }
+    OpenRequest {
+        doc_id: doc_id.into(),
+        version,
+        title: "Báo cáo quý.pptx".into(),
+        format: "pptx".into(),
+        bytes: Some(pptx()),
+        mode: Mode::Edit,
+        can_download: true,
+        preserve_view: false,
+    }
 }
 
 impl World {
     /// The app with one local presentation open, as the web build starts.
     fn new() -> Self {
+        Self::with_v2(false)
+    }
+
+    /// As [`World::new`] with `erpHost` v2 (`v2`) or v1, and a page that can share.
+    fn with_v2(v2: bool) -> Self {
         let calls = FakeHost::default();
         let clock = Rc::new(Cell::new(0.0));
         let now = clock.clone();
         let docs = HostDocs::new(Box::new(calls.clone()), Box::new(move || now.get()), Box::new(|| {}));
         let opens = Rc::new(RefCell::new(Vec::new()));
-        let host = ErpHost::new(docs, opens.clone(), Box::new(|| {}));
-        let services = Services {
-            host_documents: Some(host.documents()),
+        let host = ErpHost::new(docs, opens.clone(), Box::new(|| {}), v2);
+        let mut services = Services {
             // The web build's save picker; local Save As isn't exercised here.
             save_file: Some(Box::new(|_: &str, _: &[u8], _: deckcraft_ui_egui::SaveDone| {})),
             download: Some(Box::new(|_: &str, _: &[u8]| {})),
+            share: Some(Box::new(|_: &str, _: &[u8]| true)),
             ..Default::default()
         };
+        host.attach(&mut services);
         let app = SlideApp::new(Session::with_new(), services);
         World { app, host, calls, clock, opens }
     }
@@ -94,7 +111,7 @@ impl World {
 
     /// Opens `doc_id` through `open` and returns its uid.
     fn open(&mut self, doc_id: &str) -> u64 {
-        self.opens.borrow_mut().push(request(doc_id, 1));
+        self.opens.borrow_mut().push(request(doc_id, 1).into());
         let now = self.clock.get();
         self.frame(now);
         self.app.session.active().unwrap().uid
@@ -157,7 +174,7 @@ fn refused_opens_say_why() {
     // A legacy .ppt, or a password-protected .pptx: both are OLE2 containers.
     let mut ole = request("e", 1);
     ole.bytes = Some(vec![0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1, 0, 0]);
-    w.opens.borrow_mut().extend([docx, garbage, missing, ole]);
+    w.opens.borrow_mut().extend([docx, garbage, missing, ole].map(Request::from));
     w.frame(0.0);
     let opened = w.calls.0.borrow().opened.clone();
     assert_eq!(
@@ -173,7 +190,7 @@ fn refused_opens_say_why() {
         w.open(&format!("full-{i}"));
     }
     assert_eq!(w.app.session.documents().len(), 10);
-    w.opens.borrow_mut().push(request("one-too-many", 1));
+    w.opens.borrow_mut().push(request("one-too-many", 1).into());
     w.frame(0.0);
     assert_eq!(w.calls.0.borrow().opened.last().unwrap(), &("one-too-many".into(), false, Some("parserFailed".into())));
 }
@@ -237,7 +254,7 @@ fn a_conflict_stops_autosave_and_is_never_retried() {
     // The shell reloads the latest version in its place.
     let mut latest = request("d1", 7);
     latest.title = "Báo cáo quý".into();
-    w.opens.borrow_mut().push(latest);
+    w.opens.borrow_mut().push(latest.into());
     w.frame(100_000.0);
     let documents: Vec<String> = w.app.session.documents().iter().map(|d| d.title()).collect();
     assert_eq!(documents.iter().filter(|t| *t == "Báo cáo quý").count(), 1, "the tab is replaced: {documents:?}");
@@ -430,8 +447,10 @@ fn reopening_the_open_version_keeps_the_tab() {
     let mut w = World::new();
     let uid = w.open("d1");
     w.app.session.set_active(0);
-    w.opens.borrow_mut().push(request("d1", 1));
+    w.opens.borrow_mut().push(request("d1", 1).into());
     w.frame(0.0);
     assert_eq!(w.app.session.active().unwrap().uid, uid, "switched to it, not reloaded");
     assert_eq!(w.app.session.documents().len(), 2);
 }
+
+mod v2;

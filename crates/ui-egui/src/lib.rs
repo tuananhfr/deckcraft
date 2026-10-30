@@ -6,6 +6,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 #![forbid(unsafe_code)]
 
+mod access;
 pub mod account;
 pub mod backstage;
 pub mod canvas;
@@ -24,6 +25,7 @@ pub mod find;
 pub mod host_documents;
 pub mod i18n;
 pub mod icons;
+mod inline_edit;
 mod legacy_format;
 mod loss_warning;
 pub mod media;
@@ -66,6 +68,7 @@ use deckcraft_engine::{Mods, Session, UiRequest};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
+pub use access::ReadOnlyNotice;
 pub use control::{ControlRequest, ControlResponse};
 
 pub type ReadFn = Box<dyn Fn(&str) -> Result<Vec<u8>, String>>;
@@ -309,6 +312,10 @@ pub struct SlideApp {
     /// Quit was confirmed (changes saved or discarded): let the window close.
     pub quit_confirmed: bool,
     pub(crate) notes_buf: (u64, usize, String),
+    /// Text typed into a field that commits on losing focus, not yet committed.
+    inline_edit: Option<inline_edit::InlineEdit>,
+    /// Presentations whose refusals don't say the usual read-only notice, by uid.
+    read_only_notices: std::collections::HashMap<u64, access::ReadOnlyNotice>,
     /// Faces borrowed from the font database for text the interface fonts can't draw (#101).
     pub ui_fonts: uifonts::UiFonts,
     /// Thumbnail pane drag (slide index, current drop index).
@@ -389,6 +396,8 @@ impl SlideApp {
             last_recovery: 0.0,
             quit_confirmed: false,
             notes_buf: (0, usize::MAX, String::new()),
+            inline_edit: None,
+            read_only_notices: Default::default(),
             ui_fonts: uifonts::UiFonts::default(),
             thumb_drag: None,
             selpane: selpane::State::default(),
@@ -435,6 +444,9 @@ impl SlideApp {
 
     pub fn set_status(&mut self, msg: impl Into<String>) {
         let mut msg = msg.into();
+        if let Some(notice) = self.access_notice(&msg) {
+            msg = notice.to_string();
+        }
         if self.product_name != "DeckCraft" {
             for phrase in ["DeckCraft cannot read", "not a presentation DeckCraft can read", "not a DeckCraft file:"] {
                 msg = msg.replace(phrase, &phrase.replace("DeckCraft", self.product_name));
@@ -454,6 +466,12 @@ impl SlideApp {
     /// Run a command by id (UI commands here, everything else in the engine). Errors show in the
     /// status bar and are returned.
     pub fn run(&mut self, id: &str, params: Value) -> Result<Value, String> {
+        // Before a paste starts reading the clipboard or a save warns about losses.
+        if let Some(why) = self.access_refusal(id) {
+            let e = deckcraft_engine::EngineError::Disabled(id.into(), why.into()).to_string();
+            self.set_status(e.clone());
+            return Err(e);
+        }
         if self.warn_save_command(id, &params) {
             return Ok(json!({"needsConfirmation": true}));
         }
@@ -563,6 +581,9 @@ impl SlideApp {
     /// on the web. `extra` adds `file.export` params (the PDF's layout, slides…). The
     /// presentation keeps its own file. Returns whether a file was written or handed over.
     pub fn export_as(&mut self, fmt: &str, extra: Value) -> bool {
+        if !self.may_download() {
+            return false;
+        }
         let Some(slide) = self.session.active().map(|d| d.selection.slide) else { return false };
         let (ext, format, all) = match fmt {
             "pdf" => ("pdf", "pdf", false),
@@ -630,6 +651,9 @@ impl SlideApp {
     /// layout, slides and options) is written to the temporary folder and opened in the system's
     /// PDF viewer, which has the printers; on the web it downloads.
     pub fn print_pdf(&mut self, params: Value) -> bool {
+        if !self.may_download() {
+            return false;
+        }
         if self.warn_save_losses("pdf", loss_warning::Action::Print(params.clone())) {
             return false;
         }
@@ -738,6 +762,10 @@ impl SlideApp {
                 if page.needs_doc() && self.session.active().is_none() {
                     return Err(format!("File › {} needs an open presentation", page.label()));
                 }
+                if !backstage::offered(self, page) {
+                    let e = deckcraft_engine::EngineError::Disabled(id.into(), deckcraft_engine::access::NO_DOWNLOAD.into()).to_string();
+                    return Err(e);
+                }
                 self.open_backstage(page);
                 return Ok(json!({"page": page.id()}));
             }
@@ -763,7 +791,8 @@ impl SlideApp {
                     return Err("nothing to search: no presentation is open".into());
                 }
                 let text = p.get("text").and_then(Value::as_str).map(str::to_string).or_else(|| find::selected_text(&self.session));
-                self.find.open(id == "app.replace", text);
+                // Read-only, Replace opens Find: searching still works.
+                self.find.open(id == "app.replace" && self.editable(), text);
             }
             "app.shortcuts" => self.dialog = Some(dialogs::Dialog::new("shortcuts")),
             #[cfg(not(target_arch = "wasm32"))]
@@ -787,6 +816,11 @@ impl SlideApp {
             }
             "app.dialog" => {
                 let d = p.get("id").and_then(Value::as_str).ok_or("missing `id`")?;
+                if let Some(why) = self.dialog_refusal(d) {
+                    let e = deckcraft_engine::EngineError::Disabled(id.into(), why.into()).to_string();
+                    self.set_status(e.clone());
+                    return Err(e);
+                }
                 self.dialog = Some(dialogs::Dialog::new(d));
             }
             "app.links" => {
@@ -840,6 +874,9 @@ impl SlideApp {
     }
 
     pub fn save_as_dialog(&mut self, format: &str) {
+        if !self.may_download() {
+            return;
+        }
         let format = if self.session.active().is_some_and(|d| d.save_as_pptx) { "pptx" } else { format };
         let Some(uid) = self.session.active().map(|d| d.uid) else { return };
         let name = self.session.active().map(|d| d.title()).unwrap_or_else(|| "Presentation".into());
@@ -1004,6 +1041,10 @@ impl SlideApp {
 
     pub fn save(&mut self) {
         let Some((uid, path)) = self.session.active().map(|d| (d.uid, d.path.clone())) else { return };
+        if !self.editable() {
+            self.note_access(deckcraft_engine::access::READ_ONLY);
+            return;
+        }
         if self.host_owns(uid) {
             self.save_to_host(uid);
             return;
@@ -1334,6 +1375,7 @@ impl SlideApp {
             ctx.request_repaint();
             return;
         }
+        self.inline_edit = None;
         let t0 = now_ms();
         let t = theme::Tokens::get(&ctx);
         ctx.input(|i| self.touch.observe(&i.events));

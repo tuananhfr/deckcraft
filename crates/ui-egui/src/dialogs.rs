@@ -63,6 +63,11 @@ fn title(id: &str) -> &'static str {
 
 pub fn show(app: &mut SlideApp, ctx: &egui::Context) {
     let Some(mut d) = app.dialog.take() else { return };
+    // Also covers a dialog opened before the presentation turned read-only.
+    if let Some(why) = app.dialog_refusal(&d.id) {
+        app.note_access(why);
+        return;
+    }
     let mut open = true;
     let mut close = false;
     let title = if d.id == crate::legacy_format::DIALOG { crate::legacy_format::title(&d) } else { app.product_text(title(&d.id)) };

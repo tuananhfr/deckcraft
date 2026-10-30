@@ -1,10 +1,11 @@
 //! `open(doc)`: a document from the server becomes a tab, or takes the place of the tab already
-//! showing it (the shell reloads the latest version after a conflict), and the shell hears how
-//! it went (`opened`, the rules of `erpIntakeResult`).
+//! showing it (the shell reloads the latest version after a conflict, or for a viewer catching up
+//! with `preserveView`), and the shell hears how it went (`opened`, the rules of `erpIntakeResult`).
 
 use deckcraft_ui_egui::SlideApp;
 
 use super::documents::HostDocs;
+use super::mode::{self, Mode};
 
 /// The only format a presentation is stored in on the server in v1.
 const FORMAT: &str = "pptx";
@@ -17,6 +18,11 @@ pub(crate) struct OpenRequest {
     pub format: String,
     /// `None` when `bytes` was not a `Uint8Array`.
     pub bytes: Option<Vec<u8>>,
+    /// v2; v1 shells get `edit`, `true` and `false`.
+    pub mode: Mode,
+    pub can_download: bool,
+    /// Replace the open tab's content in place, keeping the slide and selection.
+    pub preserve_view: bool,
 }
 
 /// `opened`'s `reason` when `ok` is false: keys of the shell's intake messages, never text.
@@ -48,8 +54,16 @@ fn open_document(app: &mut SlideApp, docs: &HostDocs, request: &OpenRequest) -> 
         && !docs.dirty(uid)
     {
         // Already showing that version, unchanged: nothing to reload.
-        app.session.set_active(i);
+        mode::apply(app, docs, uid, request.mode, request.can_download);
+        if !request.preserve_view {
+            app.session.set_active(i);
+        }
         return Ok(());
+    }
+    if let Some((uid, _)) = previous
+        && request.preserve_view
+    {
+        return reload_in_place(app, docs, request, uid, bytes);
     }
     // At the documents limit the old tab must go first, or the new one has no room.
     let mut replaced = None;
@@ -80,6 +94,7 @@ fn open_document(app: &mut SlideApp, docs: &HostDocs, request: &OpenRequest) -> 
     d.reopenable = false;
     let (doc, revision) = (d.saved_doc.clone(), d.revision);
     docs.adopt(uid, &request.doc_id, request.version, FORMAT, doc, revision);
+    mode::apply(app, docs, uid, request.mode, request.can_download);
     // Closed without asking: the shell reloads only when the user chose the server's version.
     if replaced.is_none()
         && let Some((old, _)) = previous
@@ -91,6 +106,28 @@ fn open_document(app: &mut SlideApp, docs: &HostDocs, request: &OpenRequest) -> 
     if let Some(reported) = replaced {
         docs.inherit_reported(uid, reported);
     }
+    Ok(())
+}
+
+/// `preserveView`: the newer version replaces tab `uid`'s content, which keeps its place, zoom,
+/// slide and selection; the active tab stays the active one.
+fn reload_in_place(app: &mut SlideApp, docs: &HostDocs, request: &OpenRequest, uid: u64, bytes: &[u8]) -> Result<(), &'static str> {
+    let name = file_name(&request.title);
+    let doc = deckcraft_engine::cmd::file::open_presentation(&name, bytes)
+        .map_err(|e| if matches!(e, deckcraft_engine::EngineError::LegacyFormat(_)) { reason::UNSUPPORTED } else { reason::PARSER_FAILED })?;
+    if !app.session.replace_content(uid, doc) {
+        return Err(reason::PARSER_FAILED);
+    }
+    let Some(d) = app.session.document_mut(uid) else { return Err(reason::PARSER_FAILED) };
+    if let Some(title) = display_title(&request.title) {
+        d.title = title;
+    }
+    let (doc, revision) = (d.saved_doc.clone(), d.revision);
+    // Saved state starts over at the new version; the shell hears it is clean again if it wasn't.
+    let reported = docs.forget(uid);
+    docs.adopt(uid, &request.doc_id, request.version, FORMAT, doc, revision);
+    docs.inherit_reported(uid, reported);
+    mode::apply(app, docs, uid, request.mode, request.can_download);
     Ok(())
 }
 

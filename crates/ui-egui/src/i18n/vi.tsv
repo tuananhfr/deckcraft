@@ -1548,3 +1548,8 @@
 	Signed in to PI ID. You can close this tab and go back to the app.	Đã đăng nhập PI ID. Bạn có thể đóng thẻ này và quay lại ứng dụng.
 	Sign-in did not finish. Close this tab and try again in the app.	Chưa đăng nhập xong. Hãy đóng thẻ này và thử lại trong ứng dụng.
 	The presentation couldn't be saved to the server.	Không lưu được bản trình chiếu lên máy chủ.
+
+# ERPCons: online documents the office site opens to view or comment only (erpHost v2).
+	You can only view this presentation.	Bạn chỉ có quyền xem bản trình bày này.
+	Downloading, printing and copying are turned off for this presentation.	Bản trình bày này không cho phép tải xuống, in hoặc sao chép.
+	Comments on the web are coming later; for now you can only view.	Nhận xét trên web sẽ có sau, hiện chỉ xem được

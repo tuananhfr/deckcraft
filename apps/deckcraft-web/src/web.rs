@@ -56,7 +56,9 @@ pub fn start() {
                     let fullscreen = FullscreenBridge::install(cc.egui_ctx.clone()).ok();
                     let erp_host = crate::erp_host::install(cc.egui_ctx.clone());
                     let mut services = services(inbox.clone(), dropped.clone(), cc.egui_ctx.clone(), clipboard.clone(), dirty.clone());
-                    services.host_documents = erp_host.as_ref().map(crate::erp_host::ErpHost::documents);
+                    if let Some(erp_host) = &erp_host {
+                        erp_host.attach(&mut services);
+                    }
                     let mut app = SlideApp::new(Session::new(), services);
                     app.services.has_touch = web_sys::window().is_some_and(|w| w.navigator().max_touch_points() > 0);
                     if let Some(account) = crate::account::install() {

@@ -104,6 +104,9 @@ struct Doc<D> {
     first_edit: Option<f64>,
     last_edit: f64,
     reported_dirty: bool,
+    /// The user may only view it (`erpHost` v2 view and comment modes): no AutoSave or Save, only
+    /// `flush` for edits made before it turned read-only.
+    read_only: bool,
 }
 
 impl<D: Snapshot> Doc<D> {
@@ -149,6 +152,7 @@ impl<D: Snapshot> Scheduler<D> {
             first_edit: None,
             last_edit: 0.0,
             reported_dirty: false,
+            read_only: false,
         };
         self.docs.insert(uid, doc);
     }
@@ -178,6 +182,17 @@ impl<D: Snapshot> Scheduler<D> {
         }
     }
 
+    /// Read-only, `uid` sends no AutoSave or Save, and of the follow-up waiting behind a save in
+    /// flight only a `flush`; edits made before stay dirty and go with the shell's next `flush`.
+    pub(crate) fn set_read_only(&mut self, uid: u64, read_only: bool) {
+        if let Some(d) = self.docs.get_mut(&uid) {
+            d.read_only = read_only;
+            if read_only && d.follow_up != Some(Reason::Flush) {
+                d.follow_up = None;
+            }
+        }
+    }
+
     pub(crate) fn reported_dirty(&self, uid: u64) -> bool {
         self.docs.get(&uid).is_some_and(|d| d.reported_dirty)
     }
@@ -203,6 +218,10 @@ impl<D: Snapshot> Scheduler<D> {
     /// Asks for a save of `uid`; `Some` when it should start now.
     pub(crate) fn request(&mut self, uid: u64, reason: Reason) -> Option<Send<D>> {
         let d = self.docs.get_mut(&uid)?;
+        // One opened read-only is never dirty, so this only hands over edits from before.
+        if d.read_only && reason != Reason::Flush {
+            return None;
+        }
         if d.in_flight.is_some() {
             // A manual save outranks the follow-up reason it joins; the newest revision is sent either way.
             if d.follow_up != Some(Reason::Manual) {
@@ -230,7 +249,9 @@ impl<D: Snapshot> Scheduler<D> {
         let due: Vec<u64> = self
             .docs
             .iter()
-            .filter(|(_, d)| d.in_flight.is_none() && d.first_edit.is_some_and(|first| now - d.last_edit >= IDLE_MS || now - first >= MAX_WAIT_MS))
+            .filter(|(_, d)| {
+                !d.read_only && d.in_flight.is_none() && d.first_edit.is_some_and(|first| now - d.last_edit >= IDLE_MS || now - first >= MAX_WAIT_MS)
+            })
             .map(|(uid, _)| *uid)
             .collect();
         due.into_iter().filter_map(|uid| self.request(uid, Reason::Auto)).collect()
@@ -240,7 +261,7 @@ impl<D: Snapshot> Scheduler<D> {
     pub(crate) fn next_wake(&self, now: f64) -> Option<f64> {
         self.docs
             .values()
-            .filter(|d| d.halt.is_none() && d.in_flight.is_none() && !d.seen.busy && !d.seen.unconfirmed_losses)
+            .filter(|d| !d.read_only && d.halt.is_none() && d.in_flight.is_none() && !d.seen.busy && !d.seen.unconfirmed_losses)
             .filter_map(|d| d.first_edit.map(|first| (d.last_edit + IDLE_MS).min(first + MAX_WAIT_MS) - now))
             .reduce(f64::min)
             .map(|ms| ms.max(0.0))

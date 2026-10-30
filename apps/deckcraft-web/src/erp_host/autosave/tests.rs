@@ -250,3 +250,35 @@ fn a_flush_behind_a_save_in_flight_is_queued_until_handed_over() {
     assert_eq!(next.map(|n| n.reason), Some(Reason::Flush));
     assert!(!s.queued(UID), "handed over");
 }
+
+#[test]
+fn read_only_sends_no_autosave_or_save_and_flush_hands_over_edits_from_before() {
+    let mut s = scheduler();
+    edit(&mut s, 1, 0.0);
+    let first = s.request(UID, Reason::Manual);
+    edit(&mut s, 2, 10.0);
+    assert!(s.request(UID, Reason::Manual).is_none(), "queued behind the first");
+    assert!(s.queued(UID));
+    s.set_read_only(UID, true);
+    assert!(!s.queued(UID), "the follow-up Save is dropped");
+    for reason in [Reason::Auto, Reason::Manual] {
+        assert!(s.request(UID, reason).is_none(), "{reason:?}");
+    }
+    assert!(s.due(1e9).is_empty());
+    assert_eq!(s.next_wake(100.0), None, "nothing to wake the page for");
+    // `flush` behind the save in flight waits for it, as in edit mode.
+    assert!(s.flush().is_empty());
+    assert!(s.queued(UID));
+    let (revision, ..) = sent(first);
+    let c = s.complete(UID, revision, Outcome::Saved { version: Some(2) });
+    assert!(c.saved.is_some());
+    let (revision, written, reason) = sent(c.next);
+    assert_eq!((written, reason), (V(2), Reason::Flush), "version 2, typed before it turned read-only");
+    let c = s.complete(UID, revision, Outcome::Saved { version: Some(3) });
+    assert!(c.saved.is_some() && c.next.is_none());
+    assert!(!s.dirty(UID));
+    assert!(s.flush().is_empty(), "saved: nothing more to send");
+    s.set_read_only(UID, false);
+    edit(&mut s, 3, 20.0);
+    assert_eq!(sent(s.request(UID, Reason::Manual)).1, V(3), "editing again saves as before");
+}

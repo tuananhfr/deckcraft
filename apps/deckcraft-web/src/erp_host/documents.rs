@@ -94,6 +94,15 @@ impl HostDocs {
         }
     }
 
+    /// Read-only (view and comment modes), `uid` gets no AutoSave or Save, only `flush`; a pending
+    /// `flush` stops waiting for a follow-up that is dropped.
+    pub(crate) fn set_read_only(&self, uid: u64, read_only: bool) {
+        if let Ok(mut s) = self.0.state.try_borrow_mut() {
+            s.scheduler.set_read_only(uid, read_only);
+        }
+        self.resolve_waiters();
+    }
+
     pub(crate) fn uid_for(&self, doc_id: &str) -> Option<u64> {
         self.0.state.try_borrow().ok()?.meta.iter().find(|(_, m)| m.doc_id == doc_id).map(|(uid, _)| *uid)
     }

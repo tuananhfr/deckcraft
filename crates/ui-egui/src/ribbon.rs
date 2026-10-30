@@ -16,9 +16,20 @@ pub const NARROW_TITLE_H: f32 = TITLE_H + 44.0;
 /// Is engine command `id` enabled right now?
 pub fn enabled(app: &SlideApp, id: &str) -> bool {
     match deckcraft_engine::find_command(id) {
-        Some(c) => (c.enabled)(&app.session).is_ok(),
-        None => crate::UI_COMMANDS.iter().any(|c| c.0 == id),
+        Some(c) => app.session.available(c).is_ok(),
+        None => crate::UI_COMMANDS.iter().any(|c| c.0 == id) && app.access_refusal(id).is_none(),
     }
+}
+
+/// `enabled`, and for `app.dialog` and `view.pane` whether that dialog or pane is offered.
+pub(crate) fn offered(app: &SlideApp, id: &str, p: &Value) -> bool {
+    let named = |key: &str| p.get(key).and_then(Value::as_str);
+    enabled(app, id)
+        && match id {
+            "app.dialog" => named("id").is_none_or(|d| app.dialog_refusal(d).is_none()),
+            "view.pane" => app.editable() || named("pane").is_none_or(|pane| !crate::panes::EDITING_PANES.contains(&pane)),
+            _ => true,
+        }
 }
 
 fn run(app: &mut SlideApp, id: &str, p: Value) {
@@ -201,7 +212,7 @@ fn home_button(app: &mut SlideApp, ui: &mut Ui) {
 }
 
 fn save_button(app: &mut SlideApp, ui: &mut Ui) {
-    if named(icon_toggle(ui, Icon::Save, "Save (⌘S)", app.session.active().is_some(), false), "Save (⌘S)").clicked() {
+    if named(icon_toggle(ui, Icon::Save, "Save (⌘S)", app.session.active().is_some() && app.editable(), false), "Save (⌘S)").clicked() {
         app.request_save();
     }
 }
@@ -400,37 +411,50 @@ fn tab_strip(app: &mut SlideApp, ui: &mut Ui, t: &Tokens, ctx_tabs: &[&'static s
 
 /// The groups of ribbon tab `tab`.
 fn tab_groups(app: &mut SlideApp, ui: &mut Ui, tab: &str) {
+    // Read-only, these tabs are greyed out whole; the others grey out their editing groups.
+    let editable = app.editable();
     match tab {
         "Home" => home(app, ui),
-        "Insert" => insert(app, ui),
-        "Draw" => draw(app, ui),
-        "Design" => design(app, ui),
-        "Transitions" => transitions(app, ui),
-        "Animations" => animations(app, ui),
+        "Insert" => editing(ui, editable, |ui| insert(app, ui)),
+        "Draw" => editing(ui, editable, |ui| draw(app, ui)),
+        "Design" => editing(ui, editable, |ui| design(app, ui)),
+        "Transitions" => {
+            preview_group(app, ui, false);
+            editing(ui, editable, |ui| transitions(app, ui));
+        }
+        "Animations" => {
+            preview_group(app, ui, true);
+            editing(ui, editable, |ui| animations(app, ui));
+        }
         "Slide Show" => slide_show(app, ui),
-        "Record" => record(app, ui),
+        "Record" => editing(ui, editable, |ui| record(app, ui)),
         "Review" => review(app, ui),
         "View" => view(app, ui),
-        "Shape Format" => shape_format(app, ui),
-        "Picture Format" => picture_format(app, ui),
-        "Table Design" => table_design(app, ui),
-        "Layout" => table_layout(app, ui),
-        "Chart Design" => chart_design(app, ui),
+        "Shape Format" => editing(ui, editable, |ui| shape_format(app, ui)),
+        "Picture Format" => editing(ui, editable, |ui| picture_format(app, ui)),
+        "Table Design" => editing(ui, editable, |ui| table_design(app, ui)),
+        "Layout" => editing(ui, editable, |ui| table_layout(app, ui)),
+        "Chart Design" => editing(ui, editable, |ui| chart_design(app, ui)),
         "Playback" => playback(app, ui),
         "Slide Master" => slide_master(app, ui),
         _ => {}
     }
 }
 
+/// Ribbon groups that only change the presentation, laid out as usual and greyed out read-only.
+fn editing(ui: &mut Ui, editable: bool, add: impl FnOnce(&mut Ui)) {
+    ui.add_enabled_ui(editable, add);
+}
+
 fn big(app: &mut SlideApp, ui: &mut Ui, icon: Icon, label: &str, id: &str, p: Value) {
-    let en = enabled(app, id);
+    let en = offered(app, id, &p);
     if big_button(ui, icon, label, en).on_hover_text(tip(id, label)).clicked() {
         run(app, id, p);
     }
 }
 
 fn small(app: &mut SlideApp, ui: &mut Ui, icon: Icon, label: &str, id: &str, p: Value) {
-    let en = enabled(app, id);
+    let en = offered(app, id, &p);
     if small_button(ui, icon, label, en, false).on_hover_text(tip(id, label)).clicked() {
         run(app, id, p);
     }
@@ -1178,7 +1202,7 @@ pub fn align_menu(app: &mut SlideApp, ui: &mut Ui) {
 }
 
 pub fn menu_item(app: &mut SlideApp, ui: &mut Ui, icon: Icon, label: &str, id: &str, p: Value) {
-    let en = enabled(app, id);
+    let en = offered(app, id, &p);
     let r = small_button(ui, icon, label, en, false);
     if r.clicked() {
         run(app, id, p);
@@ -1538,18 +1562,23 @@ pub fn paint_theme_tile(p: &egui::Painter, r: Rect, th: &deckcraft_model::Theme)
 
 // ---------- Transitions ----------
 
-fn transitions(app: &mut SlideApp, ui: &mut Ui) {
-    let cur = app.session.active().and_then(|d| d.current_slide().and_then(|s| s.transition.clone()));
-    let kind = cur.as_ref().map(|t| t.kind.clone()).unwrap_or_else(|| "none".into());
+/// Plays the current slide's transition, or with `autoplay` its animations too.
+fn preview_group(app: &mut SlideApp, ui: &mut Ui, autoplay: bool) {
     group(ui, |ui| {
         if big_button(ui, Icon::Preview, "Preview", true).clicked() {
             let from = app.session.active().map(|d| d.selection.slide).unwrap_or(0);
             app.start_show(from, true);
             if let Some(s) = app.show.as_mut() {
                 s.preview_only = true;
+                s.autoplay = autoplay;
             }
         }
     });
+}
+
+fn transitions(app: &mut SlideApp, ui: &mut Ui) {
+    let cur = app.session.active().and_then(|d| d.current_slide().and_then(|s| s.transition.clone()));
+    let kind = cur.as_ref().map(|t| t.kind.clone()).unwrap_or_else(|| "none".into());
     group(ui, |ui| {
         let list = deckcraft_model::anim::TRANSITIONS;
         let shown: Vec<_> = list.iter().take(12).collect();
@@ -1729,16 +1758,6 @@ fn animations(app: &mut SlideApp, ui: &mut Ui) {
         let s = d.current_slide()?;
         let id = d.selection.shapes.first()?;
         s.animations.iter().find(|a| a.shape == *id).cloned()
-    });
-    group(ui, |ui| {
-        if big_button(ui, Icon::Preview, "Preview", true).clicked() {
-            let from = app.session.active().map(|d| d.selection.slide).unwrap_or(0);
-            app.start_show(from, true);
-            if let Some(s) = app.show.as_mut() {
-                s.preview_only = true;
-                s.autoplay = true;
-            }
-        }
     });
     group(ui, |ui| {
         let quick: Vec<_> = deckcraft_model::anim::ANIMATIONS
@@ -1930,12 +1949,13 @@ fn slide_show(app: &mut SlideApp, ui: &mut Ui) {
     group(ui, |ui| {
         big(app, ui, Icon::SetUpShow, "Set Up\nSlide Show", "app.dialog", json!({"id": "setupShow"}));
         let hidden = app.session.active().and_then(|d| d.current_slide().map(|s| s.hidden)).unwrap_or(false);
-        if big_button_ex(ui, Icon::HideSlide, "Hide\nSlide", true, false, hidden).0.clicked() {
+        if big_button_ex(ui, Icon::HideSlide, "Hide\nSlide", enabled(app, "slide.hide"), false, hidden).0.clicked() {
             run(app, "slide.hide", json!({}));
         }
     });
+    let editable = app.editable();
     group(ui, |ui| {
-        if big_button(ui, Icon::RehearseTimings, "Rehearse\nTimings", true).clicked() {
+        if big_button(ui, Icon::RehearseTimings, "Rehearse\nTimings", editable).clicked() {
             app.start_show(0, false);
             if let Some(s) = app.show.as_mut() {
                 s.rehearse = true;
@@ -1944,18 +1964,20 @@ fn slide_show(app: &mut SlideApp, ui: &mut Ui) {
         let r = big_button(ui, Icon::Record, "Record", false);
         let _ = r.on_hover_text(crate::tl!("Recording narration needs audio capture (coming soon)"));
     });
-    group(ui, |ui| {
-        rows(ui, |ui| {
-            let mut use_t = app.session.active().is_none_or(|d| d.doc.show.use_timings);
-            if ui.checkbox(&mut use_t, crate::tl!("Use Timings")).changed() {
-                run(app, "show.setup", json!({"useTimings": use_t}));
-            }
-            let mut narr = app.session.active().is_none_or(|d| !d.doc.show.without_narration);
-            if ui.checkbox(&mut narr, crate::tl!("Play Narrations")).changed() {
-                run(app, "show.setup", json!({"noNarration": !narr}));
-            }
-            let mut mc = app.session.active().is_none_or(|d| d.doc.show.show_media_controls);
-            let _ = ui.checkbox(&mut mc, crate::tl!("Show Media Controls"));
+    editing(ui, editable, |ui| {
+        group(ui, |ui| {
+            rows(ui, |ui| {
+                let mut use_t = app.session.active().is_none_or(|d| d.doc.show.use_timings);
+                if ui.checkbox(&mut use_t, crate::tl!("Use Timings")).changed() {
+                    run(app, "show.setup", json!({"useTimings": use_t}));
+                }
+                let mut narr = app.session.active().is_none_or(|d| !d.doc.show.without_narration);
+                if ui.checkbox(&mut narr, crate::tl!("Play Narrations")).changed() {
+                    run(app, "show.setup", json!({"noNarration": !narr}));
+                }
+                let mut mc = app.session.active().is_none_or(|d| d.doc.show.show_media_controls);
+                let _ = ui.checkbox(&mut mc, crate::tl!("Show Media Controls"));
+            });
         });
     });
 }
@@ -2540,6 +2562,7 @@ fn playback(app: &mut SlideApp, ui: &mut Ui) {
         .session
         .active()
         .and_then(|d| d.selected_shapes().into_iter().find_map(|s| if let ShapeKind::Media(m) = &s.kind { Some(m.clone()) } else { None }));
+    let editable = app.editable();
     group(ui, |ui| {
         let playing = app.session.active().and_then(|d| d.selection.shapes.first().copied()).is_some_and(|id| app.media.is_playing(id));
         if big_button(ui, if playing { Icon::Pause } else { Icon::Play }, if playing { "Pause" } else { "Play" }, m.is_some()).clicked() {
@@ -2548,6 +2571,9 @@ fn playback(app: &mut SlideApp, ui: &mut Ui) {
         big(app, ui, Icon::TrimMedia, "Trim", "app.dialog", json!({"id": "trim"}));
     });
     group(ui, |ui| {
+        if !editable {
+            ui.disable();
+        }
         rows(ui, |ui| {
             let mut auto = m.as_ref().is_some_and(|x| x.autoplay);
             if ui.checkbox(&mut auto, crate::tl!("Start Automatically")).changed() {
@@ -2578,7 +2604,7 @@ fn playback(app: &mut SlideApp, ui: &mut Ui) {
         });
     });
     group(ui, |ui| {
-        let r = big_button(ui, Icon::Volume, "Volume", m.is_some());
+        let r = big_button(ui, Icon::Volume, "Volume", editable && m.is_some());
         egui::Popup::menu(&r).show(|ui| {
             for (l, v) in [("Low", 0.25), ("Medium", 0.5), ("High", 1.0), ("Mute", 0.0)] {
                 if ui.button(crate::tl!(l)).clicked() {
@@ -2596,7 +2622,7 @@ fn slide_master(app: &mut SlideApp, ui: &mut Ui) {
         big(app, ui, Icon::Layout, "Rename", "app.dialog", json!({"id": "renameLayout"}));
     });
     group(ui, |ui| {
-        let r = big_button(ui, Icon::Table, "Insert\nPlaceholder", true);
+        let r = big_button(ui, Icon::Table, "Insert\nPlaceholder", app.editable());
         egui::Popup::menu(&r).show(|ui| {
             for (l, k) in
                 [("Content", "content"), ("Text", "text"), ("Picture", "picture"), ("Chart", "chart"), ("Table", "table"), ("Media", "media")]
@@ -2608,7 +2634,7 @@ fn slide_master(app: &mut SlideApp, ui: &mut Ui) {
         });
     });
     group(ui, |ui| {
-        let r = big_button(ui, Icon::Themes, "Themes", true);
+        let r = big_button(ui, Icon::Themes, "Themes", app.editable());
         egui::Popup::menu(&r).show(|ui| {
             for th in deckcraft_model::theme::builtin_themes() {
                 if ui.button(app.product_label(&th.name)).clicked() {

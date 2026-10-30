@@ -202,6 +202,10 @@ pub fn slide_menu(app: &mut SlideApp, ui: &mut Ui, i: usize) {
     if app.session.active().is_some_and(|d| d.selection.slide != i && !d.selection.slides.iter().any(|id| d.doc.slide_index(*id) == Some(i))) {
         let _ = app.run("slide.go", json!({"index": i}));
     }
+    if !app.editable() {
+        crate::canvas::copy_only_menu(app, ui, json!({"scope": "slides"}));
+        return;
+    }
     for (l, id, p) in [
         ("Cut", "edit.cut", json!({"scope": "slides"})),
         ("Copy", "edit.copy", json!({"scope": "slides"})),
