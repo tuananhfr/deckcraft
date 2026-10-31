@@ -1,5 +1,6 @@
 # ERPCons changes
 
+- First window (desktop): the window opens maximized, and Restore gives a window that fits the screen, centred above the taskbar (at most 1440×900). The fixed 1440×900 start size ran off 1366×768 screens and 150 % scaling, losing the close button under the screen edge and the bottom under the taskbar; eframe only clamps it to the whole monitor (`apps/deckcraft/src/window_fit.rs`).
 ## 2026-10-30: Windows releases no longer ship deckcraft-cli
 
 - (desktop, Windows) The MSI and the portable zip contain `deckcraft.exe` without `deckcraft-cli.exe`, whose `run --cmd … --save` and `mcp` edit presentations without the PI licence gate the app now enforces (owner decision, as pdfcraft and UbotCAD did). `packaging/windows/package.ps1` builds only `-p deckcraft`, checks, copies and signs only the app and no longer smoke-tests the CLI; `deckcraft.wxs` drops the `DeckcraftCli` component, so the major upgrade removes the copy earlier MSIs installed. `erpcons-office`'s `build/desktop-win.sh` stops cross-building it. The crate stays in the workspace (tests, `cargo xtask` gates, development and agents). macOS, Linux and FreeBSD packaging still include it; they are not released by ERPCons.

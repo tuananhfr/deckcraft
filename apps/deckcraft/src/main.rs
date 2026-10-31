@@ -22,13 +22,14 @@ mod graphics;
 mod logging;
 mod settings;
 mod updates;
+mod window_fit;
 
 use deckcraft_engine::Session;
 use deckcraft_engine::log_safe::{log_name, redact, tilde_home};
 use deckcraft_ui_egui::i18n;
 use deckcraft_ui_egui::{Services, SlideApp};
 
-struct App(SlideApp, String, #[cfg(target_os = "macos")] fmv_macos_events::Inbox);
+struct App(SlideApp, String, window_fit::WindowFit, #[cfg(target_os = "macos")] fmv_macos_events::Inbox);
 
 impl App {
     fn save_language_change(&mut self) {
@@ -44,8 +45,9 @@ impl App {
 
 impl eframe::App for App {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.2.apply(ctx);
         #[cfg(target_os = "macos")]
-        apple_events::poll(&self.2, &mut self.0, ctx);
+        apple_events::poll(&self.3, &mut self.0, ctx);
         self.0.logic(ctx);
         self.save_language_change();
     }
@@ -246,12 +248,14 @@ fn main() -> eframe::Result {
     let mut options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title(PRODUCT_NAME)
-            .with_inner_size([1440.0, 900.0])
-            .with_min_inner_size([900.0, 560.0])
+            .with_inner_size(window_fit::DEFAULT_INNER_SIZE)
+            .with_min_inner_size(window_fit::MIN_INNER_SIZE)
             .with_drag_and_drop(true)
             .with_fullsize_content_view(true)
             .with_titlebar_shown(false)
             .with_title_shown(false),
+        // Centred on the primary monitor, whose origin window_fit's restore position assumes.
+        centered: true,
         ..Default::default()
     };
     options.viewport = options.viewport.with_app_id(APP_ID);
@@ -337,6 +341,7 @@ fn main() -> eframe::Result {
             Ok(Box::new(App(
                 app,
                 language,
+                window_fit::WindowFit::default(),
                 #[cfg(target_os = "macos")]
                 apple_events.connect(&cc.egui_ctx),
             )))
