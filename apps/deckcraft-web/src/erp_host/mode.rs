@@ -25,7 +25,7 @@ impl Mode {
         }
     }
 
-    /// In phase 2 `comment` is `view` for the content: server comments come in a later milestone.
+    /// `comment` is `view` for the content: comments go through the shell's panel.
     pub(crate) fn access(self, can_download: bool) -> Access {
         match self {
             Mode::Edit => Access { editable: true, can_download, can_save: true },
@@ -38,7 +38,11 @@ impl Mode {
 /// and whether it is saved.
 pub(crate) fn apply(app: &mut SlideApp, docs: &HostDocs, uid: u64, mode: Mode, can_download: bool) {
     let access = mode.access(can_download);
-    let notice = if mode == Mode::Comment { ReadOnlyNotice::CommentsLater } else { ReadOnlyNotice::View };
+    let notice = match mode {
+        Mode::Comment if app.comments.is_some() => ReadOnlyNotice::CommentsPanel,
+        Mode::Comment => ReadOnlyNotice::CommentsLater,
+        Mode::Edit | Mode::View => ReadOnlyNotice::View,
+    };
     app.set_read_only_notice(uid, notice);
     app.set_access(uid, access);
     docs.set_read_only(uid, !access.editable);

@@ -227,8 +227,10 @@ fn read_only_slides_draw_empty_placeholders_as_the_show_does() {
     assert!(!uniform(&draw(h.state())), "an editable slide still prompts");
 }
 
+/// Comment mode points to the shell's Comments panel when the shell has the comment calls, and
+/// says comments come later when it hasn't.
 #[test]
-fn comment_mode_says_comments_on_the_web_come_later() {
+fn comment_mode_points_to_the_comments_panel_or_says_comments_come_later() {
     let mut h = harness(Access::read_only(true));
     h.state_mut().ui.language = "vi".into();
     h.run_steps(1);
@@ -237,6 +239,9 @@ fn comment_mode_says_comments_on_the_web_come_later() {
     app.set_read_only_notice(uid, crate::ReadOnlyNotice::CommentsLater);
     assert!(app.run("slide.new", json!({})).is_err());
     assert_eq!(app.status.as_ref().map(|s| s.0.as_str()), Some("Nhận xét trên web sẽ có sau, hiện chỉ xem được"));
+    app.set_read_only_notice(uid, crate::ReadOnlyNotice::CommentsPanel);
+    assert!(app.run("slide.new", json!({})).is_err());
+    assert_eq!(app.status.as_ref().map(|s| s.0.as_str()), Some("Thêm nhận xét ở khung Nhận xét; không sửa được bản trình bày ở đây."));
     app.set_read_only_notice(uid, crate::ReadOnlyNotice::View);
     assert!(app.run("slide.new", json!({})).is_err());
     assert_eq!(app.status.as_ref().map(|s| s.0.as_str()), Some("Bạn chỉ có quyền xem bản trình bày này."), "view mode is unchanged");

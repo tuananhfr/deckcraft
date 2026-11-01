@@ -105,8 +105,10 @@ impl SlideApp {
 pub enum ReadOnlyNotice {
     #[default]
     View,
-    /// The office site's comment mode, view-only until comments on the web come.
+    /// The office site's comment mode from a shell without the comment calls: nowhere to comment.
     CommentsLater,
+    /// The office site's comment mode from a shell with the comment calls: they go in its panel.
+    CommentsPanel,
 }
 
 impl SlideApp {
@@ -133,6 +135,7 @@ impl SlideApp {
             let uid = self.session.active().map(|d| d.uid);
             Some(match uid.and_then(|uid| self.read_only_notices.get(&uid)) {
                 Some(ReadOnlyNotice::CommentsLater) => crate::tl!("Comments on the web are coming later; for now you can only view."),
+                Some(ReadOnlyNotice::CommentsPanel) => crate::tl!("Add comments in the Comments panel; you can't change the presentation here."),
                 _ => crate::tl!("You can only view this presentation."),
             })
         } else if message.ends_with(NO_DOWNLOAD) {

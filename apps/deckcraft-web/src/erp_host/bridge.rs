@@ -45,8 +45,7 @@ pub(crate) fn install(ctx: egui::Context) -> Option<ErpHost> {
     );
     let live = (v2 && super::live::offered(&host)).then(|| Live::new(Box::new(super::live::JsRegionHost::new(host.clone(), ctx.clone()))));
     let live_inbox = live.as_ref().map(Live::inbox);
-    // Offered to every v2 shell: it feature-detects them.
-    let comments = v2.then(|| Comments::new(Box::new(super::comments::JsCommentHost::new(host.clone()))));
+    let comments = (v2 && super::comments::offered(&host)).then(|| Comments::new(Box::new(super::comments::JsCommentHost::new(host.clone()))));
     let comment_calls = comments.as_ref().map(|c| (c.inbox(), c.selection()));
     let opens = Rc::new(RefCell::new(Vec::new()));
     let register = {

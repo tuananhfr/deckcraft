@@ -8,6 +8,11 @@ use js_sys::{Array, Function, JSON, Object, Promise, Reflect};
 use wasm_bindgen::closure::Closure;
 use wasm_bindgen::{JsCast as _, JsValue};
 
+/// Whether the shell has Cloud comments (detected by feature, like v3 regions).
+pub(super) fn offered(host: &JsValue) -> bool {
+    Reflect::get(host, &JsValue::from_str("commentClicked")).is_ok_and(|f| f.is_function())
+}
+
 pub(super) struct JsCommentHost {
     host: JsValue,
 }

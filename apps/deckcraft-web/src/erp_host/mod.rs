@@ -3,7 +3,8 @@
 //! and Ctrl+S call `erpHost.save` and only the server's acknowledgement marks it saved; it is never
 //! a draft. v2 adds the view and comment modes, reloading in place, the account's name and the
 //! client prefix new ids are mixed with; v3 (offered on a v2 object) co-editing by region
-//! ([`deckcraft_ui_egui::live`]); the comment calls (M5, offered to every v2 shell) Cloud comments
+//! ([`deckcraft_ui_egui::live`]); the comment calls (M5, offered to a v2 shell with
+//! `commentClicked`, which has the Comments panel) Cloud comments
 //! anchored in the presentation ([`deckcraft_ui_egui::comments`]).
 //! Without `erpHost` (version 1 or 2) none of this exists and the app is unchanged.
 
@@ -79,6 +80,10 @@ impl ErpHost {
         {
             register();
         }
+        // Before opening: a document opened in comment mode points to the shell's panel.
+        if let Some(comments) = self.comments.take() {
+            app.comments = Some(comments);
+        }
         // Before opening, so a tab closed and opened again is reported in that order.
         let open: Vec<u64> = app.session.documents().iter().map(|d| d.uid).collect();
         self.docs.retain_open(&open);
@@ -93,9 +98,6 @@ impl ErpHost {
         }
         if let Some(live) = self.live.take() {
             app.live = Some(live);
-        }
-        if let Some(comments) = self.comments.take() {
-            app.comments = Some(comments);
         }
         // The room is about the host document opened last.
         let newest = app.session.documents().iter().map(|d| d.uid).filter(|uid| self.docs.owns(*uid)).max();

@@ -58,7 +58,7 @@ fn view_and_comment_open_read_only_and_never_save() {
         assert!(!w.app.open_or_insert_bytes("dropped.png", &png()), "a dropped picture is refused");
         assert_eq!(w.app.session.type_text("x").unwrap()["handled"], false);
         assert!(std::sync::Arc::ptr_eq(&doc, &w.app.session.active().unwrap().doc), "{mode:?} changed the document");
-        // Comment mode is view-only until comments on the web come, and says so.
+        // From a shell without the comment calls, comment mode says comments come later.
         let notice = match mode {
             Mode::Comment => "Comments on the web are coming later; for now you can only view.",
             _ => "You can only view this presentation.",
@@ -74,6 +74,24 @@ fn view_and_comment_open_read_only_and_never_save() {
         assert!(w.dirty_calls().is_empty(), "dirty stays false");
         assert_eq!(w.app.save_state(uid), None);
     }
+}
+
+/// From a shell with the comment calls, comment mode (opened so, or switched to) points to its
+/// Comments panel; view mode keeps its notice.
+#[test]
+fn comment_mode_points_to_the_shells_comments_panel() {
+    let panel = "Add comments in the Comments panel; you can't change the presentation here.";
+    let mut w = World::with_v2(true);
+    w.host.comments = Some(deckcraft_ui_egui::comments::Comments::new(Box::new(super::NoShell)));
+    w.open_as("d1", Mode::Comment, true);
+    assert!(w.app.run("slide.new", json!({})).is_err());
+    assert_eq!(w.status(), Some(panel), "opened in comment mode on the first frame");
+    w.set_mode("d1", Mode::View, true);
+    assert!(w.app.run("slide.new", json!({})).is_err());
+    assert_eq!(w.status(), Some("You can only view this presentation."));
+    w.set_mode("d1", Mode::Comment, true);
+    assert!(w.app.run("slide.new", json!({})).is_err());
+    assert_eq!(w.status(), Some(panel), "switched to comment mode");
 }
 
 #[test]
