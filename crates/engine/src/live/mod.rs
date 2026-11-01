@@ -304,16 +304,16 @@ impl Session {
             c.before = Arc::new(base);
         }
         let current = prev.slides.get(st.selection.slide).map(|s| s.id);
+        // Text being edited inside a group belongs to the group's region.
+        let editing = st.selection.text.as_ref().map(|t| {
+            let slide = prev.slides.get(st.selection.slide);
+            slide.and_then(|s| crate::anchors::top_level(s, t.shape)).map_or(t.shape, |top| top.id)
+        });
         st.doc = Arc::new(next);
         if let Some(i) = current.and_then(|id| st.doc.slide_index(id)) {
             st.selection.slide = i;
         }
-        if st
-            .selection
-            .text
-            .as_ref()
-            .is_some_and(|t| touched.iter().any(|r| matches!(r, Region::Shape(_, s) if *s == t.shape) || *r == Region::Document))
-        {
+        if editing.is_some_and(|shape| touched.iter().any(|r| matches!(r, Region::Shape(_, s) if *s == shape) || *r == Region::Document)) {
             st.selection.text = None;
         }
         crate::clamp_selection(st);

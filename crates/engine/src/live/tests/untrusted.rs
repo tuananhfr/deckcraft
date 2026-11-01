@@ -43,3 +43,20 @@ fn a_whole_presentation_that_inflates_too_far_is_refused() {
     assert!(payload.len() <= payload::MAX_PAYLOAD_BYTES, "the room carries it: {} bytes", payload.len());
     refused(&mut b, "*", &payload);
 }
+
+/// Someone else's change to a group ends the text editing of a shape inside it: the caret's
+/// paragraph and offset may no longer exist.
+#[test]
+fn a_remote_change_to_a_group_ends_text_editing_inside_it() {
+    let (mut a, mut b) = pair();
+    a.go(1);
+    let ids: Vec<u32> = a.shape_ids(1).iter().map(|s| s.0).collect();
+    let group = ShapeId(u32::try_from(a.run("arrange.group", json!({"ids": ids})).unwrap()["id"].as_u64().unwrap()).unwrap());
+    relay(&mut a, &mut b);
+    b.go(1);
+    b.run("text.edit", json!({"id": ids[0]})).unwrap();
+    assert!(b.s.active().unwrap().selection.text.is_some(), "editing the child's text");
+    a.nudge(1, group, 5.0).unwrap();
+    relay(&mut a, &mut b);
+    assert_eq!(b.s.active().unwrap().selection.text, None);
+}
