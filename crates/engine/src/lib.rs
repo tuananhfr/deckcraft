@@ -8,6 +8,7 @@
 #![forbid(unsafe_code)]
 
 pub mod access;
+pub mod anchors;
 pub mod client_ids;
 mod clipboard_html;
 mod clipboard_marker;
@@ -724,6 +725,8 @@ pub(crate) fn push_undo(st: &mut DocState, label: String, doc: Arc<Presentation>
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod tests_anchors;
 #[cfg(test)]
 mod tests_clipboard;
 #[cfg(test)]
