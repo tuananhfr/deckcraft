@@ -24,6 +24,9 @@ use crate::cmd::{base64_decode, base64_encode};
 /// The room takes at most 1 MiB per message; the shell's envelope needs the rest.
 pub const MAX_PAYLOAD_BYTES: usize = 1_000_000;
 pub const VERSION: u64 = 1;
+/// What a whole-presentation payload may inflate to: a deck that travels as `*` is at most
+/// ~750 KB packed, so this is generous, and far below what opening a file allows.
+pub const MAX_DECK_INFLATED: u64 = 24 * 1024 * 1024;
 
 pub(super) fn malformed(what: &str) -> LiveError {
     LiveError::Malformed(what.into())
@@ -200,7 +203,7 @@ pub fn apply(doc: &mut Presentation, region: Region, payload: &Map<String, Value
         }
         Region::Document => {
             let bytes = payload.get("deck").and_then(Value::as_str).and_then(base64_decode).ok_or_else(|| malformed("the presentation"))?;
-            let loaded = deckcraft_format::load(&bytes).map_err(|e| LiveError::Apply(e.to_string()))?;
+            let loaded = deckcraft_format::load_within(&bytes, MAX_DECK_INFLATED).map_err(|e| LiveError::Apply(e.to_string()))?;
             let ids = doc.ids.clone();
             *doc = Presentation { ids, ..loaded };
         }

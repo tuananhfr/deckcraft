@@ -283,3 +283,5 @@ fn payloads_from_a_newer_version_or_garbage_are_refused() {
     assert!(matches!(b.s.apply_remote(b.uid, "shape:1", r#"{"v":1,"del":1}"#), Err(LiveError::Malformed(_))));
     assert_eq!(*b.doc(), before);
 }
+
+mod untrusted;

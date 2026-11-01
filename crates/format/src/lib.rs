@@ -104,8 +104,18 @@ fn read_entry(z: &mut zip::ZipArchive<Cursor<&[u8]>>, inflater: &mut Inflater, n
 
 /// Read a presentation.
 pub fn load(bytes: &[u8]) -> Result<Presentation> {
+    load_with(bytes, limits())
+}
+
+/// [`load`] inflating at most `total` bytes in all: for a package from someone else's editor.
+pub fn load_within(bytes: &[u8], total: u64) -> Result<Presentation> {
+    let l = limits();
+    load_with(bytes, Limits { entry: total.min(l.entry), total: total.min(l.total), ..l })
+}
+
+fn load_with(bytes: &[u8], limits: Limits) -> Result<Presentation> {
     let mut z = zip::ZipArchive::new(Cursor::new(bytes)).map_err(|e| FormatError::NotOurs(e.to_string()))?;
-    let mut inflater = Inflater::new(limits());
+    let mut inflater = Inflater::new(limits);
     inflater.check_entries(z.len()).map_err(|e| FormatError::TooLarge(e.to_string()))?;
     let json = match read_entry(&mut z, &mut inflater, "presentation.json") {
         Ok(json) => json,

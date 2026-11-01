@@ -265,6 +265,10 @@ impl Session {
     /// Someone else's region: applied exactly, nothing else touched, not an undo step; the
     /// current slide stays the same slide.
     pub fn apply_remote(&mut self, uid: u64, region: &str, payload: &str) -> Result<Applied, LiveError> {
+        // No editor sends more; reading a larger one would only cost memory.
+        if payload.len() > payload::MAX_PAYLOAD_BYTES {
+            return Err(LiveError::TooLarge);
+        }
         let region = Region::parse(region).ok_or_else(|| payload::malformed("the region"))?;
         let parsed = payload::parse(payload)?;
         let st = self.live_doc(uid)?;
@@ -273,6 +277,7 @@ impl Session {
         }
         let prev = st.doc.clone();
         let mut next = (*prev).clone();
+        // Catches only natively: the web build aborts on a panic, so the apply path must not panic.
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| payload::apply(&mut next, region, &parsed)))
             .map_err(|p| LiveError::Apply(crate::guard::panic_message(p.as_ref())))??;
         let touched = diff::changed(&prev, &next);
@@ -280,17 +285,23 @@ impl Session {
             return Ok(Applied { region, changed: false });
         }
         // What the user is in the middle of starts from the new content, so its step stays theirs.
-        if let Some(i) = st.interaction.as_mut() {
-            let mut base = (*i.doc).clone();
-            if payload::apply(&mut base, region, &parsed).is_ok() {
-                i.doc = Arc::new(base);
+        // A whole presentation is unpacked once: the bases take the result, keeping their ids.
+        let rebase = |base: &Presentation| -> Option<Presentation> {
+            if region == Region::Document {
+                return Some(Presentation { ids: base.ids.clone(), ..next.clone() });
             }
+            let mut base = base.clone();
+            payload::apply(&mut base, region, &parsed).is_ok().then_some(base)
+        };
+        if let Some(i) = st.interaction.as_mut()
+            && let Some(base) = rebase(&i.doc)
+        {
+            i.doc = Arc::new(base);
         }
-        if let Some(c) = st.composition.as_mut() {
-            let mut base = (*c.before).clone();
-            if payload::apply(&mut base, region, &parsed).is_ok() {
-                c.before = Arc::new(base);
-            }
+        if let Some(c) = st.composition.as_mut()
+            && let Some(base) = rebase(&c.before)
+        {
+            c.before = Arc::new(base);
         }
         let current = prev.slides.get(st.selection.slide).map(|s| s.id);
         st.doc = Arc::new(next);
