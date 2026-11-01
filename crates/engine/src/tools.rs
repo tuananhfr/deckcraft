@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::cmd::{self, xfrm_of};
-use crate::{Result, Session, TextSel};
+use crate::{EngineError, Result, Session, TextSel};
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -278,8 +278,22 @@ impl Session {
         None
     }
 
-    /// Feed a pointer event to the active tool. Returns what happened (for agents).
+    /// Feed a pointer event to the active tool. Returns what happened (for agents). In live mode a
+    /// gesture changing a region someone else holds is taken back.
     pub fn pointer(&mut self, ev: PointerEvent) -> Result<Value> {
+        let before = self.active().map(|d| (d.uid, d.doc.clone(), d.selection.clone()));
+        let r = self.pointer_event(ev);
+        if let (Some((uid, old, sel)), Some(st)) = (&before, self.active_mut())
+            && st.uid == *uid
+            && let Some(region) = crate::live::refuse_blocked(st, old, sel)
+        {
+            self.tool.drag = None;
+            return Err(EngineError::RegionLocked(region.to_string()));
+        }
+        r
+    }
+
+    fn pointer_event(&mut self, ev: PointerEvent) -> Result<Value> {
         let tol = if ev.tol > 0.0 { ev.tol } else { 4.0 };
         let p = Point::new(ev.x, ev.y);
         if !(p.x.is_finite() && p.y.is_finite()) {

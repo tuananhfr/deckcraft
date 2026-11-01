@@ -23,6 +23,7 @@ mod html_tokens;
 pub mod keys;
 pub mod legacy_format;
 pub mod links;
+pub mod live;
 pub mod log_safe;
 mod paste_inherit;
 pub mod recovery;
@@ -72,6 +73,9 @@ pub enum EngineError {
     Other(String),
     #[error("internal error in `{0}` (the presentation was kept as it was): {1}")]
     Internal(String, String),
+    /// Editing together: someone else holds this region (its id).
+    #[error("someone else is editing this part")]
+    RegionLocked(String),
 }
 
 impl From<deckcraft_model::ModelError> for EngineError {
@@ -243,6 +247,8 @@ pub struct DocState {
     pub reopenable: bool,
     /// What the host allows ([`Session::set_access`]); everything for a local presentation.
     pub access: Access,
+    /// Editing together by region ([`live`]); `None` otherwise.
+    pub live: Option<live::LiveState>,
 }
 
 static NEXT_UID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
@@ -270,6 +276,7 @@ impl DocState {
             placeholder: false,
             reopenable: true,
             access: Access::default(),
+            live: None,
         }
     }
     pub fn is_dirty(&self) -> bool {
@@ -594,6 +601,13 @@ impl Session {
         if let Some(st) = self.active_mut() {
             clamp_selection(st);
         }
+        if let (Some((uid, old, sel)), Some(st)) = (&before, self.active_mut())
+            && outer
+            && st.uid == *uid
+            && let Some(region) = live::refuse_blocked(st, old, sel)
+        {
+            return Err(EngineError::RegionLocked(region.to_string()));
+        }
         let mut transaction = None;
         if let (Some((uid, old, sel)), Some(st)) = (before, self.active_mut())
             && st.uid == uid
@@ -699,6 +713,7 @@ fn next_transaction(st: &mut DocState) -> (u64, u64) {
 
 pub(crate) fn push_undo(st: &mut DocState, label: String, doc: Arc<Presentation>, selection: Selection) -> (u64, u64) {
     let (transaction_id, timestamp) = next_transaction(st);
+    live::record(st, &doc, transaction_id);
     st.history.undo.push(HistoryEntry { transaction_id, timestamp, label, doc, selection });
     st.history.redo.clear();
     if st.history.undo.len() > st.history.limit.max(1) {
