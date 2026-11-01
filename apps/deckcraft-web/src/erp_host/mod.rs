@@ -2,13 +2,16 @@
 //! erpcons-office). A presentation the shell opens through it saves to the server: AutoSave, Save
 //! and Ctrl+S call `erpHost.save` and only the server's acknowledgement marks it saved; it is never
 //! a draft. v2 adds the view and comment modes, reloading in place, the account's name and the
-//! client prefix new ids are mixed with.
+//! client prefix new ids are mixed with; v3 (offered on a v2 object) co-editing by region
+//! ([`deckcraft_ui_egui::live`]).
 //! Without `erpHost` (version 1 or 2) none of this exists and the app is unchanged.
 
 mod autosave;
 #[cfg(target_arch = "wasm32")]
 mod bridge;
 mod documents;
+#[cfg(target_arch = "wasm32")]
+mod live;
 mod mode;
 mod open;
 mod outcome;
@@ -18,6 +21,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use deckcraft_ui_egui::host_documents::HostDocuments;
+use deckcraft_ui_egui::live::Live;
 use deckcraft_ui_egui::{Services, SlideApp};
 
 #[cfg(target_arch = "wasm32")]
@@ -33,11 +37,13 @@ pub(crate) struct ErpHost {
     /// documents.
     register: Option<Box<dyn FnOnce()>>,
     v2: bool,
+    /// v3 co-editing, handed to the app on the first frame.
+    live: Option<Live>,
 }
 
 impl ErpHost {
-    fn new(docs: HostDocs, opens: Rc<RefCell<Vec<Request>>>, register: Box<dyn FnOnce()>, v2: bool) -> Self {
-        ErpHost { docs, opens, register: Some(register), v2 }
+    fn new(docs: HostDocs, opens: Rc<RefCell<Vec<Request>>>, register: Box<dyn FnOnce()>, v2: bool, live: Option<Live>) -> Self {
+        ErpHost { docs, opens, register: Some(register), v2, live }
     }
 
     /// Hands the app the shell's documents. With v2 the app offers no Share… of its own: the
@@ -72,6 +78,12 @@ impl ErpHost {
                 Request::SetClientId(prefix) => app.session.set_client_prefix(prefix),
             }
         }
+        if let Some(live) = self.live.take() {
+            app.live = Some(live);
+        }
+        // The room is about the host document opened last.
+        let newest = app.session.documents().iter().map(|d| d.uid).filter(|uid| self.docs.owns(*uid)).max();
+        app.live_bind(newest);
         self.docs.pump();
         for apply in self.docs.take_applies() {
             match apply {
@@ -83,7 +95,9 @@ impl ErpHost {
 
     /// At the end of every frame, after edits: starts what is due; returns ms until the next
     /// AutoSave may be.
-    pub(crate) fn after_frame(&mut self, app: &SlideApp) -> Option<f64> {
+    pub(crate) fn after_frame(&mut self, app: &mut SlideApp) -> Option<f64> {
+        // After `ui`, where the user's changes were made: they go out this frame.
+        let live_busy = app.live_step();
         // Encoding a deck takes long enough to stutter a slide show, so AutoSave waits for its end.
         let showing = app.show.is_some();
         for d in app.session.documents() {
@@ -91,7 +105,8 @@ impl ErpHost {
                 self.docs.observe(d.uid, &d.doc, d.revision, showing || d.composition.is_some() || d.interaction.is_some());
             }
         }
-        self.docs.tick()
+        let wait = self.docs.tick();
+        if live_busy { Some(wait.map_or(deckcraft_ui_egui::live::SELECTION_MS, |w| w.min(deckcraft_ui_egui::live::SELECTION_MS))) } else { wait }
     }
 }
 

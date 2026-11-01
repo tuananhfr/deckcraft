@@ -175,11 +175,12 @@ impl eframe::App for WebShell {
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.app.ui(ui);
+        self.app.live_conflict_prompt(ui.ctx());
         self.sync_fullscreen();
         // After `ui`, where typing edits the presentation, so the guard is never a frame behind.
         self.dirty.set(self.app.has_unsaved_local_changes());
         self.drafts.after_frame(&self.app, ui.ctx());
-        if let Some(wait) = self.erp_host.as_mut().and_then(|erp_host| erp_host.after_frame(&self.app)) {
+        if let Some(wait) = self.erp_host.as_mut().and_then(|erp_host| erp_host.after_frame(&mut self.app)) {
             ui.ctx().request_repaint_after(std::time::Duration::from_millis(wait.ceil() as u64));
         }
     }

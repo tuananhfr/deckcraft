@@ -90,7 +90,7 @@ impl World {
         let now = clock.clone();
         let docs = HostDocs::new(Box::new(calls.clone()), Box::new(move || now.get()), Box::new(|| {}));
         let opens = Rc::new(RefCell::new(Vec::new()));
-        let host = ErpHost::new(docs, opens.clone(), Box::new(|| {}), v2);
+        let host = ErpHost::new(docs, opens.clone(), Box::new(|| {}), v2, None);
         let mut services = Services {
             // The web build's save picker; local Save As isn't exercised here.
             save_file: Some(Box::new(|_: &str, _: &[u8], _: deckcraft_ui_egui::SaveDone| {})),
@@ -106,7 +106,7 @@ impl World {
     fn frame(&mut self, now: f64) {
         self.clock.set(now);
         self.host.logic(&mut self.app);
-        self.host.after_frame(&self.app);
+        self.host.after_frame(&mut self.app);
     }
 
     /// Opens `doc_id` through `open` and returns its uid.

@@ -16,6 +16,7 @@ use super::mode::Mode;
 use super::open::OpenRequest;
 use super::request::Request;
 use super::{ErpHost, outcome};
+use deckcraft_ui_egui::live::{Live, LiveInbox};
 
 /// `flush` resolves by then even with saves still in flight.
 const FLUSH_TIMEOUT_MS: i32 = 10_000;
@@ -23,13 +24,15 @@ const FLUSH_TIMEOUT_MS: i32 = 10_000;
 /// The ids as the shell gave them (a string or a number), by their string form.
 type Ids = Rc<RefCell<HashMap<String, JsValue>>>;
 
-/// `erpHost` when the page offers version 1 or 2; checked once, at start-up.
+/// `erpHost` when the page offers version 1 or 2 (v3 co-editing is offered on a v2 object, detected
+/// by `regionWillEdit`); checked once, at start-up.
 pub(crate) fn install(ctx: egui::Context) -> Option<ErpHost> {
     let window = web_sys::window()?;
     let host = Reflect::get(&window, &JsValue::from_str("erpHost")).ok().filter(JsValue::is_object)?;
     let v2 = match Reflect::get(&host, &JsValue::from_str("version")).ok().and_then(|v| v.as_f64()) {
         Some(1.0) => false,
-        Some(2.0) => true,
+        // 3 too, should the shell ever raise it: v3 is a superset of v2.
+        Some(2.0 | 3.0) => true,
         _ => return None,
     };
     let ids = Ids::default();
@@ -39,21 +42,23 @@ pub(crate) fn install(ctx: egui::Context) -> Option<ErpHost> {
         Box::new(js_sys::Date::now),
         Box::new(move || wake.request_repaint()),
     );
+    let live = (v2 && super::live::offered(&host)).then(|| Live::new(Box::new(super::live::JsRegionHost::new(host.clone(), ctx.clone()))));
+    let live_inbox = live.as_ref().map(Live::inbox);
     let opens = Rc::new(RefCell::new(Vec::new()));
     let register = {
         let (docs, opens) = (docs.clone(), opens.clone());
         Box::new(move || {
-            if let Err(e) = ready(&host, v2, docs, opens, ids, ctx) {
+            if let Err(e) = ready(&host, v2, docs, opens, ids, ctx, live_inbox) {
                 log::warn!("erpHost.ready failed: {e}");
             }
         })
     };
-    Some(ErpHost::new(docs, opens, register, v2))
+    Some(ErpHost::new(docs, opens, register, v2, live))
 }
 
 type Requests = Rc<RefCell<Vec<Request>>>;
 
-fn ready(host: &JsValue, v2: bool, docs: HostDocs, opens: Requests, ids: Ids, ctx: egui::Context) -> Result<(), String> {
+fn ready(host: &JsValue, v2: bool, docs: HostDocs, opens: Requests, ids: Ids, ctx: egui::Context, live: Option<LiveInbox>) -> Result<(), String> {
     let docs_for_mode = docs.clone();
     let acknowledged = {
         let (docs, ids) = (docs.clone(), ids.clone());
@@ -130,6 +135,11 @@ fn ready(host: &JsValue, v2: bool, docs: HostDocs, opens: Requests, ids: Ids, ct
         set_mode.forget();
         set_user.forget();
         set_client_id.forget();
+    }
+    if let Some(inbox) = &live {
+        for (key, value) in super::live::handlers(inbox, &ctx) {
+            set(key, &value)?;
+        }
     }
     // The shell may call them at any time while the page lives.
     open.forget();
