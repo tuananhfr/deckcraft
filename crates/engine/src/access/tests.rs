@@ -12,6 +12,8 @@ use crate::*;
 /// The sample deck with a rectangle selected, and that rectangle's id and box.
 fn deck() -> (Session, u64) {
     let mut s = Session::new();
+    // One prefix for every deck: the same rectangle gets the same id in each.
+    s.set_client_prefix(ClientPrefix::parse("0000aa").unwrap());
     sample::open_sample(&mut s).unwrap();
     s.prefs.snap_to_grid = false;
     s.prefs.smart_guides = false;

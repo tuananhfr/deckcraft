@@ -5,6 +5,8 @@ use crate::*;
 /// A deck of three slides, each with a rectangle, as a PPTX round trip gives it back.
 fn reopened(slides: usize) -> model::Presentation {
     let mut s = Session::with_new();
+    // Every version made the same way, as one session's saves are: same prefix, same ids.
+    s.set_client_prefix(ClientPrefix::parse("0000aa").unwrap());
     for i in 1..slides {
         s.execute("slide.new", &json!({})).unwrap();
         s.execute("shape.insert", &json!({"preset": "rect", "rect": [10 * i, 10, 50, 50]})).unwrap();

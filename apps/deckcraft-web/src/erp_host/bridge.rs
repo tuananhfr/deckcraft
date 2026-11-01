@@ -1,5 +1,5 @@
 //! `window.erpHost` itself: the version check at start-up, `ready({open, flush, acknowledged})` (v2 adds
-//! `setMode` and `setUser`) and the editor → shell calls. Its records never carry a document's id,
+//! `setMode`, `setUser` and `setClientId`) and the editor → shell calls. Its records never carry a document's id,
 //! title or bytes, nor the account's name.
 
 use std::cell::RefCell;
@@ -114,11 +114,22 @@ fn ready(host: &JsValue, v2: bool, docs: HostDocs, opens: Requests, ids: Ids, ct
                 queue(Request::SetMode { doc_id, mode, can_download: can_download.as_bool().unwrap_or(true) });
             })
         };
-        let set_user = Closure::<dyn FnMut(JsValue)>::new(move |user: JsValue| queue(Request::SetUser(user_name(&user))));
+        let set_user = {
+            let queue = queue.clone();
+            Closure::<dyn FnMut(JsValue)>::new(move |user: JsValue| queue(Request::SetUser(user_name(&user))))
+        };
+        // A prefix that isn't six lowercase hex digits is ignored: the session keeps its own.
+        let set_client_id = Closure::<dyn FnMut(JsValue)>::new(move |prefix: JsValue| {
+            if let Some(prefix) = prefix.as_string().as_deref().and_then(deckcraft_engine::ClientPrefix::parse) {
+                queue(Request::SetClientId(prefix));
+            }
+        });
         set("setMode", set_mode.as_ref())?;
         set("setUser", set_user.as_ref())?;
+        set("setClientId", set_client_id.as_ref())?;
         set_mode.forget();
         set_user.forget();
+        set_client_id.forget();
     }
     // The shell may call them at any time while the page lives.
     open.forget();

@@ -1,7 +1,8 @@
 //! The office site's online documents: `window.erpHost` v1 and v2 (`docs/erp-host.md` in
 //! erpcons-office). A presentation the shell opens through it saves to the server: AutoSave, Save
 //! and Ctrl+S call `erpHost.save` and only the server's acknowledgement marks it saved; it is never
-//! a draft. v2 adds the view and comment modes, reloading in place and the account's name.
+//! a draft. v2 adds the view and comment modes, reloading in place, the account's name and the
+//! client prefix new ids are mixed with.
 //! Without `erpHost` (version 1 or 2) none of this exists and the app is unchanged.
 
 mod autosave;
@@ -26,7 +27,7 @@ use request::Request;
 
 pub(crate) struct ErpHost {
     docs: HostDocs,
-    /// What `open`, `setMode` and `setUser` asked for, carried out in the next frame.
+    /// What `open`, `setMode`, `setUser` and `setClientId` asked for, carried out in the next frame.
     opens: Rc<RefCell<Vec<Request>>>,
     /// Hands the shell its handlers (`open`, `flush`, `acknowledged`…), once the app can open
     /// documents.
@@ -68,6 +69,7 @@ impl ErpHost {
                 Request::Open(request) => open::open(app, &self.docs, request),
                 Request::SetMode { doc_id, mode, can_download } => mode::set_mode(app, &self.docs, &doc_id, mode, can_download),
                 Request::SetUser(name) => app.session.host_author = name,
+                Request::SetClientId(prefix) => app.session.set_client_prefix(prefix),
             }
         }
         self.docs.pump();

@@ -14,6 +14,8 @@ pub(crate) enum Request {
     },
     /// v2 `setUser(user)`: the account's name, or `None` for the local preference.
     SetUser(Option<String>),
+    /// v2 `setClientId(prefix)`: what ids created from now on are mixed with.
+    SetClientId(deckcraft_engine::ClientPrefix),
 }
 
 impl From<OpenRequest> for Request {

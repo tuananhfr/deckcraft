@@ -2,14 +2,16 @@
 
 use std::io::{Cursor, Read};
 
-use deckcraft_engine::Session;
 use deckcraft_engine::cmd::{base64_decode, base64_encode};
+use deckcraft_engine::{ClientPrefix, Session};
 use quick_xml::Reader;
 use quick_xml::events::Event;
 use serde_json::json;
 
 fn blank_session() -> Session {
     let mut session = Session::new();
+    // Every session the same prefix, so source and destination number their media alike.
+    session.set_client_prefix(ClientPrefix::parse("0000aa").expect("prefix"));
     session.execute("file.new", &json!({"blank": true})).expect("new presentation");
     session.execute("slide.new", &json!({"layout": "blank"})).expect("blank slide");
     session

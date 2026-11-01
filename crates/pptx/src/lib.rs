@@ -22,6 +22,8 @@ pub use losses::opaque_loss_kind;
 
 /// Extension URI of the PowerPoint 2010 section list in `presentation.xml`.
 pub(crate) const SECTION_EXT_URI: &str = "{521415D9-36F7-43E2-AB2F-B90AF26B5E84}";
+/// `ST_SlideId`: the ids `p:sldId` may carry.
+pub(crate) const SLIDE_IDS: std::ops::Range<u32> = 256..0x8000_0000;
 
 #[derive(Debug, thiserror::Error)]
 pub enum PptxError {

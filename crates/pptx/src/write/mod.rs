@@ -6,7 +6,7 @@ mod shapes;
 mod theme;
 mod timing;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use deckcraft_geom::Xfrm;
@@ -665,8 +665,28 @@ fn section_slides(p: &Presentation) -> Vec<(String, Vec<usize>)> {
     out
 }
 
+/// The `p:sldId` of each slide: its own id, so it stays put across saves; a fresh one where that
+/// isn't a valid slide id or another slide has it.
+fn slide_file_ids(p: &Presentation) -> Vec<u32> {
+    let mut used = HashSet::new();
+    let own: Vec<Option<u32>> = p.slides.iter().map(|s| Some(s.id.0).filter(|id| crate::SLIDE_IDS.contains(id) && used.insert(*id))).collect();
+    let mut next = crate::SLIDE_IDS.start;
+    own.into_iter()
+        .map(|id| {
+            id.unwrap_or_else(|| {
+                while used.contains(&next) {
+                    next += 1;
+                }
+                used.insert(next);
+                next
+            })
+        })
+        .collect()
+}
+
 fn presentation_xml(x: &mut Exp, o: &mut Out, masters: &[(u64, String)], notes: Option<&str>, slides: &[String]) -> Vec<u8> {
     let p = x.p;
+    let slide_ids = slide_file_ids(p);
     let mut w = W::new();
     let first = (p.first_slide_number != 1).then_some(p.first_slide_number.min(9999));
     root_open(&mut w, "p:presentation", A::new().a("saveSubsetFonts", 1).o("firstSlideNum", first));
@@ -682,8 +702,8 @@ fn presentation_xml(x: &mut Exp, o: &mut Out, masters: &[(u64, String)], notes: 
     }
     if !slides.is_empty() {
         w.open0("p:sldIdLst");
-        for (i, rid) in slides.iter().enumerate() {
-            w.empty("p:sldId", A::new().a("id", 256 + i).a("r:id", rid));
+        for (id, rid) in slide_ids.iter().zip(slides) {
+            w.empty("p:sldId", A::new().a("id", id).a("r:id", rid));
         }
         w.close("p:sldIdLst");
     }
@@ -718,8 +738,8 @@ fn presentation_xml(x: &mut Exp, o: &mut Out, masters: &[(u64, String)], notes: 
             for (i, (name, list)) in sections.iter().enumerate() {
                 inner.open("p14:section", A::new().a("name", name).a("id", crate::tables::guid(&format!("section:{i}:{name}"))));
                 inner.open0("p14:sldIdLst");
-                for si in list {
-                    inner.empty("p14:sldId", A::new().a("id", 256 + si));
+                for id in list.iter().filter_map(|si| slide_ids.get(*si)) {
+                    inner.empty("p14:sldId", A::new().a("id", id));
                 }
                 inner.close("p14:sldIdLst");
                 inner.close("p14:section");

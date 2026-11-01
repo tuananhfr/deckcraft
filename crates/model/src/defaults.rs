@@ -515,6 +515,7 @@ pub fn blank_presentation(size: Size, theme: Theme, title_slide: bool) -> Presen
         embedded_fonts: vec![],
         table_styles: vec![],
         raw_ext: None,
+        ids: Default::default(),
     };
     if title_slide {
         let s = new_slide(&mut p, first_layout);

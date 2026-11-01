@@ -8,6 +8,7 @@
 #![forbid(unsafe_code)]
 
 pub mod access;
+pub mod client_ids;
 mod clipboard_html;
 mod clipboard_marker;
 mod clipboard_media;
@@ -39,6 +40,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 pub use access::Access;
+pub use client_ids::ClientPrefix;
 pub use cmd::{CommandInfo, CommandSpec, command_specs, find_command};
 pub use deckcraft_geom as geom;
 pub use deckcraft_media as media;
@@ -439,6 +441,8 @@ pub struct Session {
     pub host_author: Option<String>,
     /// What a presentation added from now on starts with ([`Session::set_new_document_access`]).
     new_document_access: Access,
+    /// Where the ids edits create come from ([`client_ids`]).
+    ids: deckcraft_model::IdSource,
 }
 
 impl Default for Session {
@@ -470,6 +474,7 @@ impl Session {
             closed: Default::default(),
             host_author: None,
             new_document_access: Access::default(),
+            ids: client_ids::new_source(),
         }
     }
     /// Who new comments are by: the host's account, else the preference.
@@ -619,11 +624,13 @@ impl Session {
     /// Mutate the active presentation (copy-on-write) and bump the revision. Refused on a
     /// read-only one ([`Access`]).
     pub fn edit<T>(&mut self, f: impl FnOnce(&mut Presentation, &mut Selection) -> Result<T>) -> Result<T> {
+        let ids = self.ids.clone();
         let st = self.doc_mut()?;
         if !st.access.editable {
             return Err(EngineError::Disabled("edit".into(), access::READ_ONLY.into()));
         }
         let mut doc = (*st.doc).clone();
+        doc.ids = ids;
         let mut sel = st.selection.clone();
         let r = f(&mut doc, &mut sel)?;
         connect::reroute(&mut doc, &sel);
@@ -708,6 +715,8 @@ mod tests_clipboard;
 mod tests_documents;
 #[cfg(test)]
 mod tests_html_clip;
+#[cfg(test)]
+mod tests_ids;
 #[cfg(test)]
 mod tests_keys;
 #[cfg(test)]

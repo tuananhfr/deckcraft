@@ -1,4 +1,5 @@
-//! `erpHost` v2: view and comment modes, `setMode`, `canDownload`, `preserveView` and `setUser`.
+//! `erpHost` v2: view and comment modes, `setMode`, `canDownload`, `preserveView`, `setUser` and
+//! `setClientId`.
 
 use super::*;
 
@@ -149,6 +150,8 @@ fn without_download_save_as_export_print_share_and_copy_are_gone() {
 /// A deck of four slides, the last three with a rectangle; `text` goes on the last one's title.
 fn deck(text: &str) -> Vec<u8> {
     let mut s = Session::with_new();
+    // Every version made the same way, as one session's saves are: same prefix, same ids.
+    s.set_client_prefix(deckcraft_engine::ClientPrefix::parse("0000aa").unwrap());
     for _ in 0..3 {
         s.execute("slide.new", &json!({})).unwrap();
         s.execute("shape.insert", &json!({"preset": "rect", "rect": [10, 10, 50, 50]})).unwrap();
@@ -204,6 +207,22 @@ fn set_user_names_new_comments_in_edit_mode() {
     w.app.run("comment.add", json!({"text": "Ẩn danh"})).unwrap();
     let authors: Vec<String> = w.app.session.active().unwrap().current_slide().unwrap().comments.iter().map(|c| c.author.clone()).collect();
     assert_eq!(authors, ["Trần Thị Bình", "Máy này"]);
+}
+
+#[test]
+fn set_client_id_names_new_slides_and_shapes() {
+    let mut w = World::new();
+    w.open("d1");
+    // One chance in 2^24 that the session picked this prefix itself.
+    let own = w.app.session.client_prefix().to_string();
+    let prefix = deckcraft_engine::ClientPrefix::parse(if own == "0c0ffe" { "0c0fff" } else { "0c0ffe" }).unwrap();
+    w.opens.borrow_mut().push(Request::SetClientId(prefix));
+    w.frame(0.0);
+    assert_eq!(w.app.session.client_prefix(), prefix);
+    w.app.run("slide.new", json!({})).unwrap();
+    let shape = w.app.run("shape.insert", json!({"preset": "rect", "rect": [10, 10, 40, 40]})).unwrap()["id"].as_u64().unwrap() as u32;
+    let slide = w.app.session.active().unwrap().current_slide().unwrap().id.0;
+    assert_eq!((slide >> 6, shape >> 6), (prefix.bits(), prefix.bits()), "{slide:#x} {shape:#x}");
 }
 
 /// One frame of the interface, as the page draws it, with `events` as input.

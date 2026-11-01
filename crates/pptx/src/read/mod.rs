@@ -19,9 +19,9 @@ use deckcraft_model::{
     Properties, Section, ShowSettings, Slide, SlideId, defaults,
 };
 
-use crate::PptxError;
 use crate::opc::{self, Package, Rels};
 use crate::xml::{Doc, El, Node};
+use crate::{PptxError, SLIDE_IDS};
 
 /// Import state shared by all parts.
 pub struct Imp<'a> {
@@ -235,14 +235,25 @@ pub fn import(bytes: &[u8]) -> Result<Presentation, PptxError> {
         custom_show_names: HashMap::new(),
         table_style_ids: Vec::new(),
     };
-    // Slide ids first so hyperlinks anywhere can point at slides.
+    // Slide ids first so hyperlinks anywhere can point at slides. A slide keeps the file's id
+    // (`ST_SlideId`, unique), so ids stay put across saves and every session reads the same ones.
     let mut slide_ids: Vec<(u32, String, SlideId)> = vec![];
-    for (file_id, path) in &slide_entries {
+    let mut kept: HashSet<u32> = HashSet::new();
+    let keepable: Vec<bool> = slide_entries.iter().map(|(id, _)| SLIDE_IDS.contains(id) && kept.insert(*id)).collect();
+    for ((file_id, path), keep) in slide_entries.iter().zip(keepable) {
         if !docs.contains_key(&opc::norm(path)) {
             log::warn!("pptx: slide {path} is missing or unreadable; skipped");
             continue;
         }
-        let id = SlideId(imp.alloc());
+        let id = if keep {
+            SlideId(*file_id)
+        } else {
+            let mut n = imp.alloc();
+            while kept.contains(&n) {
+                n = imp.alloc();
+            }
+            SlideId(n)
+        };
         imp.slide_by_part.insert(opc::norm(path), id);
         slide_ids.push((*file_id, path.clone(), id));
     }

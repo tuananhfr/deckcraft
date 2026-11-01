@@ -11,6 +11,7 @@ pub mod anim;
 pub mod chart;
 pub mod defaults;
 pub mod edit;
+pub mod ids;
 pub mod import_losses;
 pub mod inflate;
 pub mod numfmt;
@@ -29,6 +30,7 @@ use serde::{Deserialize, Serialize};
 
 pub use anim::{AnimClass, AnimStart, Animation, Transition};
 pub use chart::Chart;
+pub use ids::IdSource;
 pub use style::{ColorBase, ColorRef, Effects, Fill, Line, ShapeStyle};
 pub use table::{Cell, Table};
 pub use text::{Paragraph, Run, RunProps, TextBody};
@@ -850,6 +852,9 @@ pub struct Presentation {
     /// Unmodelled presentation-level XML kept for round-trip.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub raw_ext: Option<String>,
+    /// Where ids created while editing come from; set by the editing session.
+    #[serde(skip)]
+    pub ids: IdSource,
 }
 
 impl Default for Presentation {
@@ -859,8 +864,12 @@ impl Default for Presentation {
 }
 
 impl Presentation {
-    /// A fresh id, unique across slides, shapes, layouts, masters and media in this deck.
+    /// A fresh id, unique across slides, shapes, layouts, masters and media in this deck: from the
+    /// editing session's [`IdSource`] when it has one, otherwise from the deck's own counter.
     pub fn alloc_id(&mut self) -> u32 {
+        if let Some(id) = self.alloc_session_id() {
+            return id;
+        }
         self.next_id = self.next_id.max(1).saturating_add(1);
         self.next_id
     }
