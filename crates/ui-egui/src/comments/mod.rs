@@ -28,6 +28,10 @@ pub trait CommentHost {
     fn comment_clicked(&self, thread: &str);
 }
 
+/// Threads read from one `showComments` or `resolveAnchors`: the list comes from the server, and
+/// each thread is placed again every frame.
+pub const MAX_THREADS: usize = 1000;
+
 /// One thread as `showComments` and `resolveAnchors` give it.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Thread {

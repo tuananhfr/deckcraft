@@ -21,6 +21,9 @@ pub struct Marker {
 }
 
 const BUBBLE: egui::Vec2 = vec2(22.0, 16.0);
+/// Placing a bubble checks every earlier one, each frame: threads piled on one slide beyond this
+/// get no bubble (the shell's panel lists them all).
+pub(crate) const MAX_MARKERS: usize = 64;
 const FILL: Color32 = Color32::from_rgb(0xF5, 0xB4, 0x00);
 const INK: Color32 = Color32::from_rgb(0x2B, 0x22, 0x00);
 
@@ -34,6 +37,9 @@ pub(crate) fn markers(app: &SlideApp, xf: Xf) -> Vec<Marker> {
     let slide_rect = Rect::from_two_pos(xf.to_screen(Point::new(0.0, 0.0)), xf.to_screen(Point::new(size.0, size.1)));
     let mut out: Vec<Marker> = Vec::new();
     for (thread, anchor) in comments.threads.iter().filter(|(t, _)| t.status == "open") {
+        if out.len() >= MAX_MARKERS {
+            break;
+        }
         let Some(anchor) = anchor else { continue };
         let Some((index, shape)) = anchors::place(&st.doc, anchor) else { continue };
         if index != st.selection.slide {

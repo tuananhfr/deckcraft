@@ -11,7 +11,7 @@ use deckcraft_engine::model::ShapeId;
 use deckcraft_engine::{Session, Target};
 use serde_json::{Value, json};
 
-use super::markers::markers;
+use super::markers::{MAX_MARKERS, markers};
 use super::*;
 use crate::canvas::Xf;
 use crate::live::IDLE_END_MS;
@@ -82,6 +82,21 @@ fn resolve(app: &mut SlideApp, inbox: &CommentInbox, threads: Vec<Thread>) -> Ve
     inbox.borrow_mut().push(CommentEvent::Resolve { threads, reply: Box::new(move |r| *slot.borrow_mut() = Some(r)) });
     app.comments_step();
     out.borrow_mut().take().expect("answered on the next step")
+}
+
+/// The thread list comes from the server and anyone who may comment can pile threads on one
+/// slide: a bounded number is read and resolved, and a slide draws a bounded number of bubbles
+/// (placing each checks the earlier ones, every frame).
+#[test]
+fn bounded_threads_and_markers() {
+    let (mut app, _uid, _shell, inbox, selection) = app();
+    let slide = selection.borrow().clone().unwrap();
+    let many: Vec<Thread> = (0..MAX_THREADS + 500).map(|i| thread(&format!("t{i}"), &slide, "open")).collect();
+    inbox.borrow_mut().push(CommentEvent::Show(many.clone()));
+    app.comments_step();
+    assert_eq!(app.comments.as_ref().unwrap().threads.len(), MAX_THREADS);
+    assert_eq!(markers(&app, XF).len(), MAX_MARKERS);
+    assert!(resolve(&mut app, &inbox, many).len() <= MAX_THREADS);
 }
 
 #[test]

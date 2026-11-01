@@ -6,7 +6,7 @@ use std::sync::Arc;
 use deckcraft_engine::Target;
 use deckcraft_engine::anchors::{Anchor, Resolution};
 
-use super::{AnchorStatus, CommentEvent, ResolvedThread, Thread};
+use super::{AnchorStatus, CommentEvent, MAX_THREADS, ResolvedThread, Thread};
 use crate::SlideApp;
 
 /// Characters of the slide title the label shows.
@@ -52,6 +52,7 @@ impl SlideApp {
                     if let Some(c) = self.comments.as_mut() {
                         c.threads = threads
                             .into_iter()
+                            .take(MAX_THREADS)
                             .map(|t| {
                                 let anchor = Anchor::parse(&t.anchor).ok();
                                 (t, anchor)
@@ -111,7 +112,8 @@ impl SlideApp {
     /// orphaned one keeps its anchor. A thread whose anchor this editor can't read (a newer
     /// editor's) is left out: nothing here can tell whether it still points somewhere.
     fn resolve_threads(&self, uid: u64, threads: &[Thread]) -> Vec<ResolvedThread> {
-        let readable: Vec<(&Thread, Anchor)> = threads.iter().filter_map(|t| Some((t, Anchor::parse(&t.anchor).ok()?))).collect();
+        // Threads past the cap are left out of the answer, which the shell reads as unchanged.
+        let readable: Vec<(&Thread, Anchor)> = threads.iter().take(MAX_THREADS).filter_map(|t| Some((t, Anchor::parse(&t.anchor).ok()?))).collect();
         let anchors: Vec<Anchor> = readable.iter().map(|(_, a)| a.clone()).collect();
         let resolved = self.session.resolve_anchors(uid, &anchors);
         readable
