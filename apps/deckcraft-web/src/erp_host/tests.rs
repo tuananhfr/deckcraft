@@ -90,7 +90,7 @@ impl World {
         let now = clock.clone();
         let docs = HostDocs::new(Box::new(calls.clone()), Box::new(move || now.get()), Box::new(|| {}));
         let opens = Rc::new(RefCell::new(Vec::new()));
-        let host = ErpHost::new(docs, opens.clone(), Box::new(|| {}), v2, None);
+        let host = ErpHost::new(docs, opens.clone(), Box::new(|| {}), v2, None, None);
         let mut services = Services {
             // The web build's save picker; local Save As isn't exercised here.
             save_file: Some(Box::new(|_: &str, _: &[u8], _: deckcraft_ui_egui::SaveDone| {})),
@@ -451,6 +451,31 @@ fn reopening_the_open_version_keeps_the_tab() {
     w.frame(0.0);
     assert_eq!(w.app.session.active().unwrap().uid, uid, "switched to it, not reloaded");
     assert_eq!(w.app.session.documents().len(), 2);
+}
+
+struct NoShell;
+
+impl deckcraft_ui_egui::comments::CommentHost for NoShell {
+    fn comment_clicked(&self, _thread: &str) {}
+}
+
+/// The comment calls follow the presentation the shell opened last, never a local one.
+#[test]
+fn the_comment_calls_follow_the_host_presentation() {
+    let mut w = World::with_v2(true);
+    let comments = deckcraft_ui_egui::comments::Comments::new(Box::new(NoShell));
+    let selection = comments.selection();
+    w.host.comments = Some(comments);
+    w.frame(0.0);
+    assert!(w.app.comments.is_some());
+    assert_eq!(*selection.borrow(), None, "only the local presentation is open");
+    w.open("d1");
+    let slide = w.app.session.active().unwrap().doc.slides[0].id;
+    let region = || serde_json::from_str::<serde_json::Value>(selection.borrow().as_deref().unwrap()).unwrap()["region"].clone();
+    assert_eq!(region(), format!("slide:{slide}"));
+    w.app.session.set_active(0);
+    w.frame(0.0);
+    assert_eq!(region(), format!("slide:{slide}"), "still about the host presentation");
 }
 
 mod v2;

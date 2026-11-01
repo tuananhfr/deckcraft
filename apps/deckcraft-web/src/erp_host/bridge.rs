@@ -16,6 +16,7 @@ use super::mode::Mode;
 use super::open::OpenRequest;
 use super::request::Request;
 use super::{ErpHost, outcome};
+use deckcraft_ui_egui::comments::{CommentInbox, Comments, SelectionAnchor};
 use deckcraft_ui_egui::live::{Live, LiveInbox};
 
 /// `flush` resolves by then even with saves still in flight.
@@ -44,21 +45,34 @@ pub(crate) fn install(ctx: egui::Context) -> Option<ErpHost> {
     );
     let live = (v2 && super::live::offered(&host)).then(|| Live::new(Box::new(super::live::JsRegionHost::new(host.clone(), ctx.clone()))));
     let live_inbox = live.as_ref().map(Live::inbox);
+    // Offered to every v2 shell: it feature-detects them.
+    let comments = v2.then(|| Comments::new(Box::new(super::comments::JsCommentHost::new(host.clone()))));
+    let comment_calls = comments.as_ref().map(|c| (c.inbox(), c.selection()));
     let opens = Rc::new(RefCell::new(Vec::new()));
     let register = {
         let (docs, opens) = (docs.clone(), opens.clone());
         Box::new(move || {
-            if let Err(e) = ready(&host, v2, docs, opens, ids, ctx, live_inbox) {
+            if let Err(e) = ready(&host, v2, docs, opens, ids, ctx, live_inbox, comment_calls) {
                 log::warn!("erpHost.ready failed: {e}");
             }
         })
     };
-    Some(ErpHost::new(docs, opens, register, v2, live))
+    Some(ErpHost::new(docs, opens, register, v2, live, comments))
 }
 
 type Requests = Rc<RefCell<Vec<Request>>>;
 
-fn ready(host: &JsValue, v2: bool, docs: HostDocs, opens: Requests, ids: Ids, ctx: egui::Context, live: Option<LiveInbox>) -> Result<(), String> {
+#[allow(clippy::too_many_arguments)]
+fn ready(
+    host: &JsValue,
+    v2: bool,
+    docs: HostDocs,
+    opens: Requests,
+    ids: Ids,
+    ctx: egui::Context,
+    live: Option<LiveInbox>,
+    comments: Option<(CommentInbox, SelectionAnchor)>,
+) -> Result<(), String> {
     let docs_for_mode = docs.clone();
     let acknowledged = {
         let (docs, ids) = (docs.clone(), ids.clone());
@@ -138,6 +152,11 @@ fn ready(host: &JsValue, v2: bool, docs: HostDocs, opens: Requests, ids: Ids, ct
     }
     if let Some(inbox) = &live {
         for (key, value) in super::live::handlers(inbox, &ctx) {
+            set(key, &value)?;
+        }
+    }
+    if let Some((inbox, selection)) = &comments {
+        for (key, value) in super::comments::handlers(inbox, selection, &ctx) {
             set(key, &value)?;
         }
     }

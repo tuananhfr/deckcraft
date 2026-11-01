@@ -3,12 +3,15 @@
 //! and Ctrl+S call `erpHost.save` and only the server's acknowledgement marks it saved; it is never
 //! a draft. v2 adds the view and comment modes, reloading in place, the account's name and the
 //! client prefix new ids are mixed with; v3 (offered on a v2 object) co-editing by region
-//! ([`deckcraft_ui_egui::live`]).
+//! ([`deckcraft_ui_egui::live`]); the comment calls (M5, offered to every v2 shell) Cloud comments
+//! anchored in the presentation ([`deckcraft_ui_egui::comments`]).
 //! Without `erpHost` (version 1 or 2) none of this exists and the app is unchanged.
 
 mod autosave;
 #[cfg(target_arch = "wasm32")]
 mod bridge;
+#[cfg(target_arch = "wasm32")]
+mod comments;
 mod documents;
 #[cfg(target_arch = "wasm32")]
 mod live;
@@ -20,6 +23,7 @@ mod request;
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use deckcraft_ui_egui::comments::Comments;
 use deckcraft_ui_egui::host_documents::HostDocuments;
 use deckcraft_ui_egui::live::Live;
 use deckcraft_ui_egui::{Services, SlideApp};
@@ -39,11 +43,20 @@ pub(crate) struct ErpHost {
     v2: bool,
     /// v3 co-editing, handed to the app on the first frame.
     live: Option<Live>,
+    /// The comment calls (v2), handed to the app on the first frame.
+    comments: Option<Comments>,
 }
 
 impl ErpHost {
-    fn new(docs: HostDocs, opens: Rc<RefCell<Vec<Request>>>, register: Box<dyn FnOnce()>, v2: bool, live: Option<Live>) -> Self {
-        ErpHost { docs, opens, register: Some(register), v2, live }
+    fn new(
+        docs: HostDocs,
+        opens: Rc<RefCell<Vec<Request>>>,
+        register: Box<dyn FnOnce()>,
+        v2: bool,
+        live: Option<Live>,
+        comments: Option<Comments>,
+    ) -> Self {
+        ErpHost { docs, opens, register: Some(register), v2, live, comments }
     }
 
     /// Hands the app the shell's documents. With v2 the app offers no Share… of its own: the
@@ -81,9 +94,15 @@ impl ErpHost {
         if let Some(live) = self.live.take() {
             app.live = Some(live);
         }
+        if let Some(comments) = self.comments.take() {
+            app.comments = Some(comments);
+        }
         // The room is about the host document opened last.
         let newest = app.session.documents().iter().map(|d| d.uid).filter(|uid| self.docs.owns(*uid)).max();
         app.live_bind(newest);
+        app.comments_bind(newest);
+        // Before `ui`, so what the shell sent is drawn this frame.
+        app.comments_step();
         self.docs.pump();
         for apply in self.docs.take_applies() {
             match apply {
@@ -98,6 +117,9 @@ impl ErpHost {
     pub(crate) fn after_frame(&mut self, app: &mut SlideApp) -> Option<f64> {
         // After `ui`, where the user's changes were made: they go out this frame.
         let live_busy = app.live_step();
+        // Again after `ui`: a marker clicked reaches the shell and `anchorOfSelection` sees the
+        // selection just made.
+        app.comments_step();
         // Encoding a deck takes long enough to stutter a slide show, so AutoSave waits for its end.
         let showing = app.show.is_some();
         for d in app.session.documents() {
