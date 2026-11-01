@@ -184,6 +184,7 @@ pub fn show(app: &mut SlideApp, ui: &mut Ui) {
     }
     pointer(app, ui, &resp, xf);
     overlays(app, ui, &painter, xf, &t);
+    crate::live::paint(app, &painter, xf);
     ime_output(app, ui, xf);
     media_bar(app, ui, xf);
     gif_buttons(app, ui, xf, &gifs);

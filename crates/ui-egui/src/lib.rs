@@ -27,6 +27,7 @@ pub mod i18n;
 pub mod icons;
 mod inline_edit;
 mod legacy_format;
+pub mod live;
 mod loss_warning;
 pub mod media;
 pub mod menus;
@@ -278,6 +279,8 @@ pub struct SlideApp {
     pub status: Option<(String, f64)>,
     /// A brief notice over the bottom of the window (missing fonts on opening a file).
     pub toast: Option<toast::Toast>,
+    /// Editing together by region (`erpHost` v3, web only; `None` elsewhere).
+    pub live: Option<live::Live>,
     /// Documents (by uid) whose missing fonts have been mentioned.
     fonts_noted: std::collections::HashSet<u64>,
     pub perf: Perf,
@@ -373,6 +376,7 @@ impl SlideApp {
             media: media::MediaHost::new(audio_out),
             status: None,
             toast: None,
+            live: None,
             fonts_noted: Default::default(),
             perf: Perf { frame_ms: 0.0, render_ms: 0.0, fps: 0.0 },
             synthetic: vec![],
