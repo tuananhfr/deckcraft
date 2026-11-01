@@ -14,6 +14,7 @@ pub mod clipboard;
 mod clipboard_keys;
 mod close_document;
 pub mod close_many;
+pub mod comments;
 pub mod control;
 pub mod credits;
 pub mod dialogs;
@@ -281,6 +282,8 @@ pub struct SlideApp {
     pub toast: Option<toast::Toast>,
     /// Editing together by region (`erpHost` v3, web only; `None` elsewhere).
     pub live: Option<live::Live>,
+    /// Cloud comments (the `erpHost` comment calls, web only; `None` elsewhere).
+    pub comments: Option<comments::Comments>,
     /// Documents (by uid) whose missing fonts have been mentioned.
     fonts_noted: std::collections::HashSet<u64>,
     pub perf: Perf,
@@ -377,6 +380,7 @@ impl SlideApp {
             status: None,
             toast: None,
             live: None,
+            comments: None,
             fonts_noted: Default::default(),
             perf: Perf { frame_ms: 0.0, render_ms: 0.0, fps: 0.0 },
             synthetic: vec![],

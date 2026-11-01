@@ -15,7 +15,7 @@ use deckcraft_engine::live::Region;
 const NAMES: [&str; 2] = ["Ada", "Bea"];
 
 #[derive(Default)]
-struct Room {
+pub(crate) struct Room {
     inboxes: Vec<LiveInbox>,
     /// (region, seat)
     locks: Vec<(String, usize)>,
@@ -107,16 +107,16 @@ fn deck() -> Vec<u8> {
     cmd::file::save_bytes(&s.active().unwrap().doc, "pptx").unwrap()
 }
 
-struct Client {
-    app: SlideApp,
-    uid: u64,
+pub(crate) struct Client {
+    pub(crate) app: SlideApp,
+    pub(crate) uid: u64,
 }
 
 impl Client {
-    fn step(&mut self) -> bool {
+    pub(crate) fn step(&mut self) -> bool {
         self.app.live_step()
     }
-    fn go(&mut self, index: usize) {
+    pub(crate) fn go(&mut self, index: usize) {
         self.app.run("slide.go", json!({"index": index})).unwrap();
     }
     fn shapes(&self) -> Vec<ShapeId> {
@@ -141,7 +141,7 @@ impl Client {
 }
 
 /// Two apps with the same presentation open, in one room, after their first frame.
-fn pair() -> (Client, Client, Rc<RefCell<Room>>) {
+pub(crate) fn pair() -> (Client, Client, Rc<RefCell<Room>>) {
     let room = Rc::new(RefCell::new(Room::default()));
     let bytes = deck();
     let mut clients = Vec::new();
@@ -168,11 +168,11 @@ fn pair() -> (Client, Client, Rc<RefCell<Room>>) {
     (a, b, room)
 }
 
-fn log(room: &Rc<RefCell<Room>>) -> Vec<String> {
+pub(crate) fn log(room: &Rc<RefCell<Room>>) -> Vec<String> {
     std::mem::take(&mut room.borrow_mut().log)
 }
 
-fn at(room: &Rc<RefCell<Room>>, now: f64) {
+pub(crate) fn at(room: &Rc<RefCell<Room>>, now: f64) {
     room.borrow().now.set(now);
 }
 
