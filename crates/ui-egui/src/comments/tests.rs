@@ -107,12 +107,48 @@ fn the_selection_anchor_is_the_selected_shape_else_the_slide() {
     let shape = json_of(&anchor_of_rect(&mut app, &selection, 1));
     let slide_id = app.session.active().unwrap().doc.slides[1].id;
     assert_eq!(shape["region"], format!("shape:{slide_id}:{}", rect(&app, 1)));
-    assert_eq!((shape["label"].clone(), shape["soft"]["title"].clone()), ("Slide 2 · Budget".into(), "Budget".into()));
+    assert_eq!((shape["label"].clone(), shape["soft"]["title"].clone()), ("Slide 2 · Rectangle 3".into(), "Budget".into()));
     app.comments_step();
     assert_eq!(json_of(selection.borrow().as_deref().unwrap())["region"], format!("slide:{slide_id}"), "deselected: the slide");
     app.session.select(|_, sel| sel.target = Target::Master { master: 0 }).unwrap();
     app.comments_step();
     assert_eq!(*selection.borrow(), None, "Slide Master view anchors nothing");
+}
+
+/// The panel shows `label` above a thread: the slide as people count it, then the quoted text,
+/// else the shape's name, else the slide's title; in the interface language.
+#[test]
+fn labels_name_the_slide_then_the_quote_or_the_shape() {
+    let (mut app, _uid, _shell, _inbox, selection) = app();
+    let label = |selection: &SelectionAnchor| json_of(selection.borrow().as_deref().unwrap())["label"].clone();
+    app.run("slide.go", json!({"index": 2})).unwrap();
+    app.comments_step();
+    assert_eq!(label(&selection), "Slide 3 · Plan");
+    let id = rect(&app, 1);
+    app.run("slide.go", json!({"index": 1})).unwrap();
+    app.run("shape.rename", json!({"id": id.0, "name": "Revenue chart"})).unwrap();
+    app.run("edit.select", json!({"ids": [id.0]})).unwrap();
+    app.comments_step();
+    assert_eq!(label(&selection), "Slide 2 · Revenue chart");
+    app.run("text.set", json!({"id": id.0, "text": format!("Doanh  thu\nquý ba {}", "x".repeat(100))})).unwrap();
+    let select_text = |app: &mut SlideApp, to: (usize, usize)| {
+        app.session
+            .select(|_, sel| sel.text = Some(deckcraft_engine::TextSel { shape: id, anchor: (0, 0), caret: to, ..Default::default() }))
+            .unwrap();
+        app.comments_step();
+    };
+    select_text(&mut app, (0, 10));
+    assert_eq!(label(&selection), "Slide 2 · “Doanh thu”");
+    assert_eq!(json_of(selection.borrow().as_deref().unwrap())["quote"], "Doanh thu");
+    select_text(&mut app, (1, 200));
+    let long = label(&selection).as_str().unwrap().to_owned();
+    assert!(long.starts_with("Slide 2 · “Doanh thu quý ba xx") && long.ends_with("x…”"), "{long}");
+    assert_eq!(long.chars().count(), "Slide 2 · “”".chars().count() + 60);
+    crate::i18n::set_current(crate::i18n::Lang::from_code("vi").unwrap());
+    select_text(&mut app, (0, 5));
+    let vi = label(&selection);
+    crate::i18n::set_current(crate::i18n::Lang::EN);
+    assert_eq!(vi, "Trang chiếu 2 · “Doanh”");
 }
 
 #[test]
@@ -165,7 +201,10 @@ fn resolving_answers_each_readable_thread_kept_or_orphaned() {
     let out = resolve(&mut app, &inbox, vec![thread("t1", &shape, "open"), thread("t2", newer, "open")]);
     assert_eq!(out.len(), 1, "a newer editor's anchor is left out");
     let moved = json_of(&out[0].anchor);
-    assert_eq!((out[0].status, moved["soft"]["index"].clone(), moved["label"].clone()), (AnchorStatus::Open, 2.into(), "Slide 3 · Budget".into()));
+    assert_eq!(
+        (out[0].status, moved["soft"]["index"].clone(), moved["label"].clone()),
+        (AnchorStatus::Open, 2.into(), "Slide 3 · Rectangle 3".into())
+    );
     app.run("slide.go", json!({"index": 2})).unwrap();
     let id = rect(&app, 2);
     app.run("edit.delete", json!({"ids": [id.0]})).unwrap();
@@ -223,7 +262,7 @@ fn another_persons_changes_move_the_anchor_through_the_room() {
         (out[0].status, moved["region"].clone(), moved["soft"]["index"].clone()),
         (AnchorStatus::Open, json_of(&shape)["region"].clone(), 0.into())
     );
-    assert_eq!(moved["label"], "Slide 1");
+    assert_eq!(moved["label"], "Slide 1 · Oval 2");
     a.go(0);
     assert_eq!(markers(&a.app, XF).iter().map(|m| m.thread.as_str()).collect::<Vec<_>>(), ["t1"], "the marker follows its slide");
 

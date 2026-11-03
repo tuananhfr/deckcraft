@@ -9,20 +9,31 @@ use deckcraft_engine::anchors::{Anchor, Resolution};
 use super::{AnchorStatus, CommentEvent, MAX_THREADS, ResolvedThread, Thread};
 use crate::SlideApp;
 
-/// Characters of the slide title the label shows.
-const LABEL_TITLE_CHARS: usize = 60;
+/// Characters of the quote, shape name or title the label shows, as WordCraft's label.
+const LABEL_TEXT_CHARS: usize = 60;
 
-/// `label` of an anchor: the slide as people count it, and its title.
+fn cut(text: &str) -> String {
+    if text.chars().count() <= LABEL_TEXT_CHARS {
+        return text.to_owned();
+    }
+    let kept: String = text.chars().take(LABEL_TEXT_CHARS - 1).collect();
+    format!("{}…", kept.trim_end())
+}
+
+/// `label` of an anchor: the slide as people count it, then the quoted text, else the shape's
+/// name, else the slide's title.
 fn label(anchor: &Anchor) -> String {
     let slide = crate::i18n::fmt(crate::tl!("Slide {n}"), &[("n", &anchor.index.saturating_add(1).to_string())]);
-    if anchor.title.is_empty() {
+    let what = if !anchor.quote.is_empty() {
+        format!("“{}”", cut(&anchor.quote))
+    } else if !anchor.name.is_empty() {
+        cut(&anchor.name)
+    } else if !anchor.title.is_empty() {
+        cut(&anchor.title)
+    } else {
         return slide;
-    }
-    let mut title: String = anchor.title.chars().take(LABEL_TITLE_CHARS).collect();
-    if anchor.title.chars().count() > LABEL_TITLE_CHARS {
-        title.push('…');
-    }
-    format!("{slide} · {title}")
+    };
+    format!("{slide} · {what}")
 }
 
 fn anchor_json(anchor: &Anchor) -> String {

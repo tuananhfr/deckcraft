@@ -7,17 +7,22 @@
 //!  "region":"shape:<slideId>:<shapeId>" | "slide:<slideId>",
 //!  "pos":{"box":[x,y,w,h], "text":{"from":[p,c],"to":[p,c]}} | null,
 //!  "soft":{"index":<0-based slide>,"title":"<slide title>","name":"<shape name>"},
-//!  "label":"Trang chiếu 2 · Tiêu đề"}
+//!  "quote":"<selected text>",
+//!  "order":[<slide>, <y>, <x>, <paragraph>, <char>],
+//!  "label":"Trang chiếu 2 · “Doanh thu”"}
 //! ```
 //!
 //! `region` is the co-editing region of the selected shape (its top-level shape, as locked) or, with
 //! no shape selected, of the slide. `pos` is where in the region: the shape's box in slide points
 //! and the selected text, if any (paragraph, character). `soft` finds it again when the slide's id
 //! is gone (another version of the file): the slide by its title, nearest its old position, then
-//! the shape by its id. `label` is the shell's hint for people, made by the app and ignored when
-//! an anchor is read.
+//! the shape by its id. `quote` is the text selected when the comment was made, kept as it was
+//! (absent when none was). `order` is the shell's sort key, in reading order: the slide, then the
+//! shape's top and left, then where its text starts; a slide anchor has the slide alone, so it
+//! sorts before its shapes. `label` is the shell's hint for people, made by the app; `order` and
+//! `label` are ignored when an anchor is read.
 
-use deckcraft_model::{Presentation, Shape, ShapeId, Slide, SlideId, walk};
+use deckcraft_model::{Presentation, Shape, ShapeId, Slide, SlideId, TextBody, find_shape, walk};
 use serde_json::{Value, json};
 
 use crate::live::Region;
@@ -28,6 +33,8 @@ pub const ANCHOR_VERSION: u64 = 1;
 pub const MAX_ANCHOR_BYTES: usize = 16 * 1024;
 /// The title and name kept to find an anchor again.
 pub const MAX_TEXT_CHARS: usize = 200;
+/// The longest quote, as WordCraft's panel quote; a longer selection ends in `…`.
+pub const QUOTE_CHARS: usize = 120;
 const MAX_INDEX: u64 = 1 << 24;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -43,6 +50,8 @@ pub struct Anchor {
     pub index: usize,
     pub title: String,
     pub name: String,
+    /// The selected text when the comment was made ([`QUOTE_CHARS`] at most), or empty.
+    pub quote: String,
 }
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]
@@ -60,9 +69,56 @@ pub enum Resolution {
     Orphaned,
 }
 
-/// Whitespace collapsed to single spaces, trimmed, cut to [`MAX_TEXT_CHARS`] characters.
+/// Whitespace collapsed to single spaces, trimmed, control characters dropped (the server refuses
+/// `\u0000`), cut to [`MAX_TEXT_CHARS`] characters.
 pub fn clean_text(s: &str) -> String {
-    s.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(MAX_TEXT_CHARS).collect()
+    let kept: String = s.chars().filter(|c| c.is_whitespace() || !c.is_control()).collect();
+    kept.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(MAX_TEXT_CHARS).collect()
+}
+
+/// `chars` cleaned like [`clean_text`] and cut to [`QUOTE_CHARS`], ending in `…` when cut; reads
+/// no further than that.
+fn shown(chars: impl Iterator<Item = char>) -> String {
+    let mut out: Vec<char> = Vec::with_capacity(QUOTE_CHARS + 2);
+    let mut gap = false;
+    for c in chars {
+        if c.is_whitespace() {
+            gap = !out.is_empty();
+            continue;
+        }
+        if c.is_control() {
+            continue;
+        }
+        if std::mem::take(&mut gap) {
+            out.push(' ');
+        }
+        out.push(c);
+        if out.len() > QUOTE_CHARS {
+            out.truncate(QUOTE_CHARS - 1);
+            while out.last() == Some(&' ') {
+                out.pop();
+            }
+            out.push('…');
+            break;
+        }
+    }
+    out.into_iter().collect()
+}
+
+/// `body`'s text from `from` to `to` (paragraph, character), as [`shown`].
+fn quote_of(body: &TextBody, from: (usize, usize), to: (usize, usize)) -> String {
+    let paragraphs = body.paragraphs.iter().enumerate().take(to.0.saturating_add(1)).skip(from.0);
+    shown(paragraphs.flat_map(|(pi, p)| {
+        let start = if pi == from.0 { from.1 } else { 0 };
+        let end = if pi == to.0 { to.1 } else { usize::MAX };
+        let text: Vec<char> = p.text().chars().take(end).skip(start).collect();
+        (pi > from.0).then_some('\n').into_iter().chain(text)
+    }))
+}
+
+/// A coordinate in `order`: finite, with at most two decimals, short enough for the server.
+fn key(v: f64) -> f64 {
+    if v.is_finite() { round(v.clamp(-1e9, 1e9)) } else { 0.0 }
 }
 
 fn round(v: f64) -> f64 {
@@ -124,6 +180,7 @@ impl Anchor {
             index: usize::try_from(index).map_err(|_| AnchorError::Malformed("slide index"))?,
             title: text_of("title"),
             name: text_of("name"),
+            quote: obj.get("quote").and_then(Value::as_str).filter(|_| shape.is_some()).map(|q| shown(q.chars())).unwrap_or_default(),
         })
     }
 
@@ -141,13 +198,33 @@ impl Anchor {
             }
             Value::Object(pos)
         });
-        json!({
+        let mut value = json!({
             "v": ANCHOR_VERSION,
             "region": self.region().to_string(),
             "pos": pos,
             "soft": { "index": self.index, "title": self.title, "name": self.name },
+            "order": self.order(),
             "label": label,
-        })
+        });
+        if !self.quote.is_empty()
+            && let Some(obj) = value.as_object_mut()
+        {
+            obj.insert("quote".into(), json!(self.quote));
+        }
+        value
+    }
+
+    /// The shell's sort key: the slide, then (for a shape) its top and left, then where the
+    /// selected text starts.
+    pub fn order(&self) -> Vec<Value> {
+        let mut out = vec![json!(self.index)];
+        if let (Some(_), Some([x, y, ..])) = (self.shape, self.bounds) {
+            out.extend([json!(key(y)), json!(key(x))]);
+            if let Some((from, _)) = self.text {
+                out.extend([json!(from.0), json!(from.1)]);
+            }
+        }
+        out
     }
 }
 
@@ -182,6 +259,7 @@ fn anchor_at(doc: &Presentation, index: usize, shape: Option<ShapeId>, text: Opt
         index,
         title: clean_text(&slide.title()),
         name: top.map(|s| clean_text(&s.name)).unwrap_or_default(),
+        quote: String::new(),
     })
 }
 
@@ -189,7 +267,7 @@ fn anchor_at(doc: &Presentation, index: usize, shape: Option<ShapeId>, text: Opt
 /// shape is gone), else a slide with its title nearest its old position holding its shape, else
 /// orphaned.
 pub fn resolve(doc: &Presentation, anchor: &Anchor) -> Resolution {
-    let found = |index: usize| anchor_at(doc, index, anchor.shape, anchor.text);
+    let found = |index: usize| anchor_at(doc, index, anchor.shape, anchor.text).map(|a| Anchor { quote: anchor.quote.clone(), ..a });
     if let Some(index) = doc.slides.iter().position(|s| s.id == anchor.slide) {
         return found(index).map_or(Resolution::Orphaned, Resolution::Open);
     }
@@ -224,7 +302,11 @@ impl Session {
         let text = st.selection.text.as_ref().filter(|t| !t.notes && t.cell.is_none());
         let shape = text.map(|t| t.shape).or_else(|| st.selection.shapes.first().copied());
         let range = text.filter(|t| Some(t.shape) == shape).map(|t| t.ordered());
-        anchor_at(&st.doc, index, shape, range).or_else(|| anchor_at(&st.doc, index, None, None))
+        let quote = range
+            .zip(shape)
+            .and_then(|((from, to), id)| Some(quote_of(find_shape(&st.doc.slides.get(index)?.shapes, id)?.text.as_ref()?, from, to)))
+            .unwrap_or_default();
+        anchor_at(&st.doc, index, shape, range).map(|a| Anchor { quote, ..a }).or_else(|| anchor_at(&st.doc, index, None, None))
     }
 
     /// [`resolve`] for each anchor in presentation `uid`; every one orphaned without it.
