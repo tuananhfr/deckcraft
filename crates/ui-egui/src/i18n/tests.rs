@@ -46,6 +46,27 @@ fn slide_show_end_and_touch_exit_have_vietnamese_labels() {
     assert_eq!(tr(vi, "Exit slide show"), "Thoát trình chiếu");
 }
 
+/// Co-editing messages read as in WordCraft and GridCraft, including the engine's refusal, which
+/// reaches the status bar untranslated and is looked up when drawn.
+#[test]
+fn co_editing_messages_are_vietnamese_as_in_the_other_editors() {
+    let vi = Lang::from_code("vi").unwrap();
+    let refused = deckcraft_engine::EngineError::RegionLocked("shape:256:7".into()).to_string();
+    assert_eq!(tr(vi, &refused), "Có người khác đang sửa phần này nên thay đổi của bạn chưa được thực hiện.");
+    assert_eq!(fmt(tr(vi, "{name} is editing this part."), &[("name", "An Nguyễn")]), "An Nguyễn đang sửa phần này.");
+    for (en, expected) in [
+        ("Editing together", "Cùng sửa"),
+        ("Someone else is editing this part.", "Người khác đang sửa phần này."),
+        ("Someone else changed this part while you were offline.", "Người khác đã sửa phần này khi bạn mất kết nối."),
+        ("Keep mine", "Giữ bản của tôi"),
+        ("Use theirs", "Dùng bản mới"),
+        ("This change is too large to share while editing together.", "Thay đổi này quá lớn để chia sẻ khi cùng sửa."),
+        ("Skipped a change someone else has edited since.", "Đã bỏ qua một thay đổi mà người khác đã sửa sau đó."),
+    ] {
+        assert_eq!(tr(vi, en), expected);
+    }
+}
+
 #[test]
 fn fmt_fills_placeholders_once() {
     assert_eq!(fmt("Slide {n} of {total}", &[("n", "2"), ("total", "{n}")]), "Slide 2 of {n}");

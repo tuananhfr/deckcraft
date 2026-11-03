@@ -1574,5 +1574,6 @@
 	Use theirs	Dùng bản mới
 	{name} is editing this part.	{name} đang sửa phần này.
 	Someone else is editing this part.	Người khác đang sửa phần này.
+	Someone else is editing this part; your change was not made.	Có người khác đang sửa phần này nên thay đổi của bạn chưa được thực hiện.
 	This change is too large to share while editing together.	Thay đổi này quá lớn để chia sẻ khi cùng sửa.
 	Skipped a change someone else has edited since.	Đã bỏ qua một thay đổi mà người khác đã sửa sau đó.

@@ -212,6 +212,20 @@ fn a_shape_someone_else_holds_refuses_the_edit_and_names_them() {
     assert!(b.nudge(shapes[1], 5.0), "another shape is free");
 }
 
+/// The status bar shows the refusal as stored and translates it when drawn, as WordCraft words it.
+#[test]
+fn a_refused_edit_is_told_in_the_interface_language() {
+    let (mut a, mut b, _room) = pair();
+    let shapes = a.shapes();
+    assert!(a.nudge(shapes[0], 20.0));
+    a.step();
+    b.step();
+    assert!(!b.nudge(shapes[0], 5.0));
+    let status = b.app.status.clone().map(|s| s.0).unwrap_or_default();
+    let vi = crate::i18n::Lang::from_code("vi").unwrap();
+    assert_eq!(crate::i18n::tr(vi, &status), "Có người khác đang sửa phần này nên thay đổi của bạn chưa được thực hiện.");
+}
+
 #[test]
 fn a_refused_lock_takes_the_change_back_and_keeps_the_holders_version() {
     let (mut a, mut b, room) = pair();

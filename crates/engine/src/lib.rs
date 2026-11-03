@@ -75,7 +75,7 @@ pub enum EngineError {
     #[error("internal error in `{0}` (the presentation was kept as it was): {1}")]
     Internal(String, String),
     /// Editing together: someone else holds this region (its id).
-    #[error("someone else is editing this part")]
+    #[error("{}", live::LOCK_DENIED)]
     RegionLocked(String),
 }
 

@@ -27,6 +27,10 @@ pub use region::Region;
 
 use crate::{DocState, EngineError, HistoryEntry, Session};
 
+/// [`EngineError::RegionLocked`]'s message: WordCraft's and GridCraft's words, so the editors'
+/// catalogs translate it alike.
+pub const LOCK_DENIED: &str = "Someone else is editing this part; your change was not made.";
+
 #[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
 pub enum LiveError {
     #[error("the presentation isn't being edited together")]
